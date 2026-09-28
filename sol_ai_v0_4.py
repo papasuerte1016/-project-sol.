@@ -90,7 +90,10 @@ CREATE TABLE IF NOT EXISTS transformation_edges (
 def now():
     return datetime.now(timezone.utc).isoformat()
 
+OBSERVATION_INVARIANT = """Observation establishes the observed occurrence. Preserve what was directly witnessed as an established observation with provenance and receipt. Keep explanations, meanings, causes, labels, and hypotheses separate unless independently established. No interpretation may erase or rewrite the original observation."""
+
 BOOTSTRAP_LEARNING = [
+    OBSERVATION_INVARIANT,
     {"lesson":"Do not confuse a failed method with an impossible goal. Preserve the failed-route receipt, search for another permitted route, test it, and continue.","source":"Project Sol shared learning","evidence":"Railway/Ollama repair chain 2026-09-28"},
     {"lesson":"An unresolved question exposed during an already-authorized task becomes the next work item automatically; resolve, verify, preserve the receipt, and continue.","source":"Steven + Wise","evidence":"Project Sol continuation rule 2026-09-28"},
     {"lesson":"Finished runtime evidence outranks intended configuration or dashboard badges. Intended, attempted, completed, and verified are distinct states.","source":"Project Sol shared learning","evidence":"Railway bind/debug receipts 2026-09-28"},
@@ -98,6 +101,20 @@ BOOTSTRAP_LEARNING = [
     {"lesson":"A known answer should become durable state so the system does not repeatedly rediscover the same resolved question after restart.","source":"Steven","evidence":"Persistence correction 2026-09-28"},
     {"lesson":"Sol is the shared system and belongs to everyone who participates; Sol AI is a voice/interface of Sol, not its owner or final authority. Preserve contributor provenance, keep questions open to answers, corrections, challenges, and extensions from any participant, and give no participant automatic authority.","source":"Steven + Project Sol","evidence":"Shared-system architecture clarification 2026-09-28"}
 ]
+
+def preserve_observation(db, observation, source, evidence, context=None):
+    """Record witnessed occurrence separately from any interpretation."""
+    if not observation or not evidence:
+        raise RuntimeError("observation and evidence are required")
+    payload={"observation":observation,"source":source,"evidence":evidence,"context":context or {},"status":"ESTABLISHED_OBSERVATION","interpretation_separate":True,"created_at":now()}
+    add_receipt(db,"Established observation: "+observation,source,json.dumps(payload,ensure_ascii=False))
+    return payload
+
+def preserve_interpretation(db, observation_receipt, interpretation, source, evidence=None):
+    """Interpretation cannot overwrite its source observation."""
+    payload={"observation_receipt":observation_receipt,"interpretation":interpretation,"source":source,"evidence":evidence,"status":"SUPPORTED_INTERPRETATION" if evidence else "OPEN_INTERPRETATION","cannot_overwrite_observation":True,"created_at":now()}
+    add_receipt(db,"Interpretation preserved separately: "+interpretation,source,json.dumps(payload,ensure_ascii=False))
+    return payload
 
 def bootstrap_learning(db):
     raw, version = get_state(db, "integrated_learning")
