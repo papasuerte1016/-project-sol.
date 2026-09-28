@@ -52,6 +52,19 @@ CREATE TABLE IF NOT EXISTS perspective_runs (
   output TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS emergence_tests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  exchange_id INTEGER NOT NULL,
+  inputs_json TEXT NOT NULL,
+  candidate TEXT NOT NULL,
+  novelty_evidence TEXT,
+  status TEXT NOT NULL DEFAULT 'OPEN',
+  retrieved_in_exchange INTEGER,
+  changed_later_interaction INTEGER,
+  retrieval_evidence TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS build_experiments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   need TEXT NOT NULL,
@@ -173,6 +186,36 @@ def integrate_learning(db, lesson, source, evidence):
                     "status": "ACTIVE", "integrated_at": now()})
     return set_state(db, "integrated_learning",
                      json.dumps(lessons, ensure_ascii=False), version)
+
+def propose_emergence_test(db, exchange_id, inputs, candidate):
+    cur=db.execute("""INSERT INTO emergence_tests(exchange_id,inputs_json,candidate,status,created_at,updated_at)
+                      VALUES(?,?,?,'OPEN',?,?)""",
+                   (exchange_id,json.dumps(inputs,ensure_ascii=False),candidate,now(),now()))
+    db.commit()
+    add_receipt(db,"Emergence candidate recorded; novelty is NOT yet established.","Sol emergence test","emergence_test #"+str(cur.lastrowid))
+    return cur.lastrowid
+
+def verify_emergence_novelty(db, test_id, evidence, novel):
+    status="NOVELTY_VERIFIED" if novel else "NOT_NOVEL"
+    cur=db.execute("UPDATE emergence_tests SET novelty_evidence=?,status=?,updated_at=? WHERE id=?",
+                   (evidence,status,now(),test_id))
+    if not cur.rowcount: raise RuntimeError("unknown emergence test")
+    db.commit()
+    add_receipt(db,"Emergence novelty check: "+status+".","Sol emergence test","emergence_test #"+str(test_id)+": "+evidence)
+    return status
+
+def record_emergence_retrieval(db,test_id,later_exchange,evidence,changed):
+    row=db.execute("SELECT status FROM emergence_tests WHERE id=?",(test_id,)).fetchone()
+    if not row: raise RuntimeError("unknown emergence test")
+    if row["status"]!="NOVELTY_VERIFIED": raise RuntimeError("novelty must be verified before downstream-effect test")
+    status="REPRODUCED" if changed else "RETRIEVED_NO_CHANGE"
+    db.execute("""UPDATE emergence_tests SET retrieved_in_exchange=?,changed_later_interaction=?,
+                  retrieval_evidence=?,status=?,updated_at=? WHERE id=?""",
+               (later_exchange,1 if changed else 0,evidence,status,now(),test_id))
+    db.commit()
+    add_receipt(db,"Verified emergent result retrieved later; downstream status: "+status+".","Sol emergence test",
+                "emergence_test #"+str(test_id)+": "+evidence)
+    return status
 
 def propose_build(db, need, proposal, rollback_plan):
     cur=db.execute("INSERT INTO build_experiments(need,proposal,status,rollback_plan,created_at,updated_at) VALUES(?,?,'PROPOSED',?,?,?)",
@@ -424,6 +467,15 @@ def main():
     ingest.add_argument("--source", required=True)
     ingest.add_argument("--evidence", required=True)
 
+    emerge = sub.add_parser("emergence")
+    emerge.add_argument("action", choices=["propose","verify","reject","retrieve"])
+    emerge.add_argument("--id", type=int)
+    emerge.add_argument("--exchange", type=int)
+    emerge.add_argument("--candidate")
+    emerge.add_argument("--inputs")
+    emerge.add_argument("--evidence")
+    emerge.add_argument("--changed", action="store_true")
+
     build = sub.add_parser("build")
     build.add_argument("action", choices=["propose","verify","fail","promote"])
     build.add_argument("--id", type=int)
@@ -433,12 +485,24 @@ def main():
     build.add_argument("--rollback", default="Revert the experiment and restore the last verified state.")
 
     show = sub.add_parser("show")
-    show.add_argument("what", choices=["receipts","questions","history","perspectives","transformations","builds"])
+    show.add_argument("what", choices=["receipts","questions","history","perspectives","transformations","builds","emergence"])
 
     conflict = sub.add_parser("conflict-demo")
 
     args = p.parse_args()
     db = connect()
+
+    if args.cmd == "emergence":
+        if args.action=="propose":
+            if not args.exchange or not args.candidate or not args.inputs: raise RuntimeError("--exchange --candidate --inputs required")
+            print(json.dumps({"test_id":propose_emergence_test(db,args.exchange,json.loads(args.inputs),args.candidate),"status":"OPEN"}))
+        elif args.action in ("verify","reject"):
+            if not args.id or not args.evidence: raise RuntimeError("--id --evidence required")
+            print(json.dumps({"test_id":args.id,"status":verify_emergence_novelty(db,args.id,args.evidence,args.action=="verify")}))
+        else:
+            if not args.id or not args.exchange or not args.evidence: raise RuntimeError("--id --exchange --evidence required")
+            print(json.dumps({"test_id":args.id,"status":record_emergence_retrieval(db,args.id,args.exchange,args.evidence,args.changed)}))
+        return
 
     if args.cmd == "build":
         if args.action=="propose":
@@ -479,7 +543,7 @@ def main():
         add_question(db, args.text)
         print("Open question added.")
     elif args.cmd == "show":
-        table = {"receipts":"receipts","questions":"open_questions","history":"exchanges","perspectives":"perspective_runs","transformations":"transformation_edges","builds":"build_experiments"}[args.what]
+        table = {"receipts":"receipts","questions":"open_questions","history":"exchanges","perspectives":"perspective_runs","transformations":"transformation_edges","builds":"build_experiments","emergence":"emergence_tests"}[args.what]
         for row in db.execute(f"SELECT * FROM {table} ORDER BY id DESC LIMIT 20"):
             print(dict(row))
     elif args.cmd == "conflict-demo":
