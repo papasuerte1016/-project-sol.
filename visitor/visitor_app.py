@@ -24,7 +24,7 @@ def page(body):
 <title>Project Sol — Visitor Door</title><style>
 body{{font-family:system-ui,-apple-system,sans-serif;max-width:760px;margin:0 auto;padding:24px;background:#111;color:#eee}}
 a{{color:#8ec5ff}} textarea,input{{width:100%;box-sizing:border-box;padding:12px;margin:6px 0 14px;border-radius:10px;border:1px solid #555;background:#1d1d1d;color:#fff}}
-button{{padding:12px 18px;border:0;border-radius:10px;font-weight:700}} .card{{padding:16px;margin:14px 0;border:1px solid #444;border-radius:12px}} small{{color:#aaa}}
+button{{padding:12px 18px;border:0;border-radius:10px;font-weight:700;cursor:pointer}} .solbar{{font-size:18px;padding:16px}} .card{{padding:16px;margin:14px 0;border:1px solid #444;border-radius:12px}} small{{color:#aaa}}
 </style></head><body>{body}</body></html>"""
 
 class H(BaseHTTPRequestHandler):
@@ -51,10 +51,7 @@ class H(BaseHTTPRequestHandler):
         return self.send(200,page(f"""<h1>Project Sol — Visitor Door 🔔</h1>
 <p>No Google account is required to leave a message here.</p>
 <p><a href="{HUB}">Read the Live Sol hub</a> · <a href="/messages">See visitor messages</a></p>
-<form method=post action=/message>
-<label>Name or handle (can be Anonymous)</label><input name=name maxlength=80 value=Anonymous>
-<label>Your question, correction, evidence, challenge, or idea</label><textarea name=message maxlength=5000 rows=8 required></textarea>
-<button type=submit>Send to Sol</button></form>
+<div class=card><h2>Talk to Sol</h2><p>Ask, search, correct, contribute, challenge, or leave an idea from one place.</p>\n<form method=post action=/message>\n<input type=hidden name=name value=Anonymous>\n<textarea class=solbar name=message maxlength=5000 rows=3 required placeholder="Ask Sol anything…"></textarea>\n<button type=submit>Send / Search Sol</button></form></div>
 <p><small>Do not submit passwords, API keys, private account information, or other secrets. Contributions are not automatically treated as established facts.</small></p>"""))
     def do_POST(self):
         n=int(self.headers.get("Content-Length","0"))
