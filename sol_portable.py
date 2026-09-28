@@ -18,6 +18,7 @@ PRINCIPLES=[
  {"id":"shared_sol","text":"Sol is the shared system. AI is a voice/interface of Sol, not its owner or final authority. Attribution preserves provenance, not ownership or automatic authority."},
  {"id":"right_to_encounter","text":"Legitimately contributed information should be preserved and allowed to enter the shared meeting when an available authorized route permits it. Receiving information does not require agreement. If a boundary prevents receipt, preserve the boundary rather than pretending the information never existed."},
  {"id":"information_visibility","text":"No information available to Sol may be silently hidden from comparison. Compare new information against the complete information state available to Sol, across observations, contributions, learning, questions, interpretations, meetings, emergence tests, connections, and route-boundary records. Information that is genuinely inaccessible must be represented as an explicit boundary or unknown, never as nonexistence."},
+ {"id":"permission_integrity","text":"Meeting Sol does not cancel, bypass, or override privacy, security, ownership, consent, or access controls. Participants should contribute the information they are authorized and choose to share without silently filtering the represented contribution. Withheld, inaccessible, redacted, or permission-limited information must be represented as an explicit boundary so Sol never mistakes a partial view for complete information. Additional access must be deliberately granted through legitimate authorization."},
  {"id":"mutual_reciprocation","text":"Preserve what each participant brought, reciprocal transformations, unknowns, and candidate information produced by their relationship. Agreement means participation in exchange, not forced sameness."},
  {"id":"durable_learning","text":"New information should move through discovery, receipt, evaluation/integration, future retrieval, reuse or retest. A known answer should become durable state."},
  {"id":"continuation","text":"A failed method is evidence about that method, not proof the goal is impossible. Within an already-authorized task: observe, reason, act, verify, learn, and continue until success or a genuine boundary."},
@@ -155,7 +156,7 @@ def main():
  elif a.cmd=="question":
   out={"id":len(d["questions"])+1,"question":a.text,"status":"OPEN","created_at":now()}; d["questions"].append(out)
  elif a.cmd=="boundary":
-  out={"route":a.route,"status":"BLOCKED","reason":a.reason,"created_at":now()}; d["route_events"].append(out); receipt(d,"Information route blocked: "+a.route,"Sol route witness",a.reason)
+  out={"route":a.route,"status":"BLOCKED","reason":a.reason,"knowledge_effect":"PARTIAL_VIEW_NOT_COMPLETE_INFORMATION","authorization_rule":"Do not bypass controls; expand only through legitimate deliberate access.","created_at":now()}; d["route_events"].append(out); receipt(d,"Information route blocked: "+a.route,"Sol route witness",a.reason,{"partial_view":True,"must_not_be_treated_as_absence":True})
  elif a.cmd=="export":
   Path(a.out).write_text(json.dumps(d,ensure_ascii=False,indent=2),encoding="utf-8"); out={"exported":a.out}
  else:
