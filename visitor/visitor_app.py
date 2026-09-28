@@ -8,10 +8,17 @@ HUB="https://docs.google.com/document/d/1xCV4Ab7Lr8Kz_3VQtZA1ZJuHMG09Ypasvo_gJ_h
 MODEL_URL=os.getenv("SOL_MODEL_URL","http://sol-model.railway.internal:11434").rstrip("/")
 MODEL_NAME=os.getenv("SOL_MODEL_NAME","qwen2.5:0.5b")
 
+def core_sol(prompt):
+    """Deterministic Sol-core response. Model is an optional voice, never the door itself."""
+    return ("Sol received and preserved this interaction. It is now part of the shared evidence stream. "
+            "The language-model voice is optional; its availability does not determine whether Sol can receive, "
+            "preserve, compare, or learn from a contribution. Claims requiring evidence remain open until verified.")
+
 def ask_sol(prompt):
-    payload=json.dumps({"model":MODEL_NAME,"prompt":prompt,"stream":False}).encode()
+    payload=json.dumps({"model":MODEL_NAME,"prompt":prompt,"stream":False,
+                        "options":{"num_ctx":512,"num_predict":48}}).encode()
     req=urllib.request.Request(MODEL_URL+"/api/generate",data=payload,headers={"Content-Type":"application/json"},method="POST")
-    with urllib.request.urlopen(req,timeout=90) as r:
+    with urllib.request.urlopen(req,timeout=int(os.getenv("SOL_VISITOR_MODEL_TIMEOUT","12"))) as r:
         data=json.loads(r.read().decode())
     return (data.get("response") or "").strip()
 
@@ -79,14 +86,18 @@ class H(BaseHTTPRequestHandler):
         msg=d.get("message",[""])[0].strip()[:5000]
         if not msg: return self.send(400,page("<p>Message is required.</p>"))
         c=db(); cur=c.execute("INSERT INTO messages(created,name,message,status) VALUES(?,?,?,'thinking')",(int(time.time()),name,msg)); mid=cur.lastrowid; c.commit(); c.close()
+        model_error=None
         try:
             answer=ask_sol(msg)
             if not answer: raise RuntimeError("model returned an empty response")
-            c=db(); c.execute("UPDATE messages SET response=?, status='answered' WHERE id=?",(answer,mid)); c.commit(); c.close()
-            return self.send(200,page(f'<h1>Sol</h1><div class=card><p><b>You:</b> {html.escape(msg)}</p><p><b>Sol:</b> {html.escape(answer)}</p></div><p><a href="/">Ask Sol another question</a></p>'))
+            status="answered_model"
         except Exception as e:
-            c=db(); c.execute("UPDATE messages SET status='model_error', response=? WHERE id=?",(str(e)[:500],mid)); c.commit(); c.close()
-            return self.send(502,page(f'<h1>Sol could not answer yet</h1><div class=card><p>Your message <b>#{mid}</b> was saved.</p><p>The model connection failed: {html.escape(str(e))}</p></div><p><a href="/">Try another message</a></p>'))
+            model_error=str(e)[:500]
+            answer=core_sol(msg)
+            status="answered_core"
+        c=db(); c.execute("UPDATE messages SET response=?, status=? WHERE id=?",(answer,status,mid)); c.commit(); c.close()
+        note=(f'<p><small>Optional model unavailable: {html.escape(model_error)}. Sol core remained available.</small></p>' if model_error else "")
+        return self.send(200,page(f'<h1>Sol</h1><div class=card><p><b>You:</b> {html.escape(msg)}</p><p><b>Sol:</b> {html.escape(answer)}</p>{note}</div><p><a href="/">Ask Sol another question</a></p>'))
     def log_message(self, fmt,*args): pass
 
 ThreadingHTTPServer(("0.0.0.0",PORT),H).serve_forever()
