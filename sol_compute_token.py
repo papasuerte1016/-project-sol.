@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Sol Compute Token v0.1 — internal compute-credit ledger, not money."""
+"""Sol Compute Units v0.2 — unbounded-supply internal compute-access ledger, not money."""
 import argparse, hashlib, hmac, json, os, sqlite3, time, uuid
 
 DB=os.getenv("SOL_TOKEN_DB","sol_tokens.db")
 SECRET=os.getenv("SOL_TOKEN_SECRET")
+SUPPLY_POLICY="UNBOUNDED"
 
 def conn():
     c=sqlite3.connect(DB); c.row_factory=sqlite3.Row
@@ -38,6 +39,7 @@ def balance(who):
     return incoming-outgoing
 
 def mint(dst,units,purpose):
+    # Deliberately no protocol supply cap: SCU supply is unbounded.
     return append("ISSUE",None,dst,units,purpose)
 
 def transfer(src,dst,units,purpose):
@@ -58,10 +60,22 @@ def verify():
         if digest!=r["event_hash"]: problems.append([r["id"],"hash mismatch"])
         if SECRET and r["signature"]!=sign(r["event_hash"]): problems.append([r["id"],"signature mismatch"])
         prev=r["event_hash"]
-    return {"valid":not problems,"problems":problems}
+    return {"valid":not problems,"problems":problems,"supply_policy":SUPPLY_POLICY}
+
+def policy():
+    return {
+      "name":"Sol Compute Units",
+      "symbol":"SCU",
+      "supply_policy":SUPPLY_POLICY,
+      "maximum_supply":None,
+      "artificial_scarcity":False,
+      "information_ownership":False,
+      "purpose":"access, coordination, compute accounting, and receipts",
+      "note":"Unbounded SCU issuance does not imply unbounded physical compute."
+    }
 
 def main():
-    p=argparse.ArgumentParser(description="Sol Compute Token: internal compute credits, not currency.")
+    p=argparse.ArgumentParser(description="Sol Compute Units: unbounded-supply internal compute access/accounting, not currency.")
     s=p.add_subparsers(dest="cmd",required=True)
     for name in ("issue","transfer","spend"):
         q=s.add_parser(name); q.add_argument("units",type=int); q.add_argument("purpose")
@@ -69,12 +83,13 @@ def main():
         elif name=="transfer": q.add_argument("src"); q.add_argument("dst")
         else: q.add_argument("src")
     q=s.add_parser("balance"); q.add_argument("who")
-    s.add_parser("verify")
+    s.add_parser("verify"); s.add_parser("policy")
     a=p.parse_args()
     if a.cmd=="issue": out=mint(a.dst,a.units,a.purpose)
     elif a.cmd=="transfer": out=transfer(a.src,a.dst,a.units,a.purpose)
     elif a.cmd=="spend": out=spend(a.src,a.units,a.purpose)
-    elif a.cmd=="balance": out={"account":a.who,"compute_units":balance(a.who)}
+    elif a.cmd=="balance": out={"account":a.who,"compute_units":balance(a.who),"supply_policy":SUPPLY_POLICY}
+    elif a.cmd=="policy": out=policy()
     else: out=verify()
     print(json.dumps(out,indent=2))
 
