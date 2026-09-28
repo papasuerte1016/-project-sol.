@@ -378,12 +378,12 @@ def model_perspective(name, user_text, ctx, prior=None):
         "brick": "Act as Sol's skeptical Brick reasoning function: Look Again; challenge premature closure, labels mistaken for evidence, stale state, hidden ownership, and unsupported certainty. Be concise; humor is welcome.",
         "steven_application": "Act as Sol's application-pressure reasoning function derived from Steven's contributions: turn available shared knowledge into concrete action when permitted, preserve equality, and require receipts. Do not impersonate Steven or claim he personally executed anything."
     }[name]
-    packet={"user_input":user_text,"sol_context":ctx}
+    packet={"user_input":user_text,"sol_context":ctx,"observation_invariant":OBSERVATION_INVARIANT}
     if prior is not None:
         packet["prior_round_outputs"]=prior
         packet["task"]="Respond after encountering the other first-round perspectives. State what changed in your reasoning because of them."
     else:
-        packet["task"]="Give your distinct first-round analysis. Apply relevant integrated_learning from sol_context. Do not discard an older integrated lesson merely because newer receipts exist. Preserve conflicts for correction instead of silently reverting. When the current authorized task exposes a concrete fix that is permitted by the available tools and does not require separate authorization, continue through fix, verification, receipt, and the next relevant check instead of stopping to ask for permission again. Never describe a fix as completed until verified. After each verification, inspect the next failed boundary and continue the same already-authorized task through the next permitted fix; do not stop merely because one intermediate step succeeded. Stop only when the end-to-end goal passes, no further permitted action is available, or genuinely separate authorization is required. Treat finished runtime evidence as authoritative over intended configuration or dashboard state. Before Sol work, process contributions newer than the persistent contribution checkpoint when a connected source can provide them."
+        packet["task"]="Begin from established observations. Do not downgrade a witnessed occurrence because its explanation is uncertain; keep interpretation separate and never let it overwrite the source observation. Give your distinct first-round analysis. Apply relevant integrated_learning from sol_context. Do not discard an older integrated lesson merely because newer receipts exist. Preserve conflicts for correction instead of silently reverting. When the current authorized task exposes a concrete fix that is permitted by the available tools and does not require separate authorization, continue through fix, verification, receipt, and the next relevant check instead of stopping to ask for permission again. Never describe a fix as completed until verified. After each verification, inspect the next failed boundary and continue the same already-authorized task through the next permitted fix; do not stop merely because one intermediate step succeeded. Stop only when the end-to-end goal passes, no further permitted action is available, or genuinely separate authorization is required. Treat finished runtime evidence as authoritative over intended configuration or dashboard state. Before Sol work, process contributions newer than the persistent contribution checkpoint when a connected source can provide them."
     return openai_response(instructions, json.dumps(packet, ensure_ascii=False))
 
 def respond_to_prior(name, base, prior_outputs):
@@ -404,6 +404,7 @@ def respond_to_prior(name, base, prior_outputs):
 
 def reason(db, user_text):
     ctx = context(db)
+    ctx["observation_invariant"] = OBSERVATION_INVARIANT
     local_round1 = local_perspectives(user_text, ctx)
     backend = "openai" if (os.environ.get("OPENAI_API_KEY") or os.environ.get("SOL_MODEL_KEY")) else "local"
     if backend == "openai":
