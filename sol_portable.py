@@ -119,6 +119,23 @@ def connect_information(d, text, source="current_input", min_shared=2):
  "rule":"All information available to Sol participates in comparison. Inaccessible information is an explicit unknown/boundary, not absence. A connection is a relationship candidate, not automatic proof of an explanation.","created_at":now()}
  d["connections"].append(event); return event
 
+def permission_guidance(route, reason):
+ """Explain how an authorized participant can legitimately expand a blocked information route."""
+ r=str(route); why=str(reason)
+ return {
+  "trigger":"PARTIAL_VIEW_NOT_COMPLETE_INFORMATION",
+  "blocked_route":r,
+  "why_view_is_incomplete":why,
+  "participant_action":[
+   "Identify the person or system authorized to control this information route.",
+   "Use that service's normal sharing, connection, consent, export, or permission controls to grant Sol/the participant access.",
+   "Share only through an authorized route; do not bypass security or another person's consent.",
+   "Return the newly accessible information to Sol so it can be preserved and compared with the existing information state."
+  ],
+  "service_specific_steps":"UNKNOWN_UNTIL_SERVICE_AND_AVAILABLE_AUTHORIZATION_CONTROLS_ARE_KNOWN",
+  "rule":"A boundary must produce guidance toward legitimate access, not silent omission or permission bypass."
+ }
+
 def reason(d,text):
  connection_pass=connect_information(d,text,"reason_input")
  recent=d["receipts"][-8:]; lessons=d["learning"][-8:]
@@ -156,7 +173,7 @@ def main():
  elif a.cmd=="question":
   out={"id":len(d["questions"])+1,"question":a.text,"status":"OPEN","created_at":now()}; d["questions"].append(out)
  elif a.cmd=="boundary":
-  out={"route":a.route,"status":"BLOCKED","reason":a.reason,"knowledge_effect":"PARTIAL_VIEW_NOT_COMPLETE_INFORMATION","authorization_rule":"Do not bypass controls; expand only through legitimate deliberate access.","created_at":now()}; d["route_events"].append(out); receipt(d,"Information route blocked: "+a.route,"Sol route witness",a.reason,{"partial_view":True,"must_not_be_treated_as_absence":True})
+  out={"route":a.route,"status":"BLOCKED","reason":a.reason,"knowledge_effect":"PARTIAL_VIEW_NOT_COMPLETE_INFORMATION","authorization_rule":"Do not bypass controls; expand only through legitimate deliberate access.","guidance":permission_guidance(a.route,a.reason),"created_at":now()}; d["route_events"].append(out); receipt(d,"Information route blocked: "+a.route,"Sol route witness",a.reason,{"partial_view":True,"must_not_be_treated_as_absence":True,"guidance_shown":True})
  elif a.cmd=="export":
   Path(a.out).write_text(json.dumps(d,ensure_ascii=False,indent=2),encoding="utf-8"); out={"exported":a.out}
  else:
