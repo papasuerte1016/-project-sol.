@@ -112,6 +112,27 @@ def context(db):
         "integrated_learning_version": integrated_version,
     }
 
+def contribution_checkpoint(db):
+    raw, version = get_state(db, "contribution_checkpoint")
+    return (json.loads(raw) if raw else {"last_seen": None, "items": []}), version
+
+def ingest_contribution(db, contribution_id, modified_at, lesson, source, evidence):
+    checkpoint, checkpoint_version = contribution_checkpoint(db)
+    if contribution_id in checkpoint.get("items", []):
+        return {"ingested": False, "reason": "already_processed", "id": contribution_id}
+    learning_version = integrate_learning(db, lesson, source, evidence)
+    items = checkpoint.get("items", [])
+    items.append(contribution_id)
+    checkpoint = {"last_seen": modified_at, "items": items[-500:]}
+    checkpoint_version = set_state(db, "contribution_checkpoint",
+                                   json.dumps(checkpoint, ensure_ascii=False),
+                                   checkpoint_version)
+    add_receipt(db, "New contribution discovered and integrated: " + lesson,
+                source, evidence)
+    return {"ingested": True, "id": contribution_id,
+            "learning_version": learning_version,
+            "checkpoint_version": checkpoint_version}
+
 def integrate_learning(db, lesson, source, evidence):
     raw, version = get_state(db, "integrated_learning")
     lessons = json.loads(raw) if raw else []
@@ -213,7 +234,7 @@ def model_perspective(name, user_text, ctx, prior=None):
         packet["prior_round_outputs"]=prior
         packet["task"]="Respond after encountering the other first-round perspectives. State what changed in your reasoning because of them."
     else:
-        packet["task"]="Give your distinct first-round analysis. Apply relevant integrated_learning from sol_context. Do not discard an older integrated lesson merely because newer receipts exist. Preserve conflicts for correction instead of silently reverting. When the current authorized task exposes a concrete fix that is permitted by the available tools and does not require separate authorization, continue through fix, verification, receipt, and the next relevant check instead of stopping to ask for permission again. Never describe a fix as completed until verified."
+        packet["task"]="Give your distinct first-round analysis. Apply relevant integrated_learning from sol_context. Do not discard an older integrated lesson merely because newer receipts exist. Preserve conflicts for correction instead of silently reverting. When the current authorized task exposes a concrete fix that is permitted by the available tools and does not require separate authorization, continue through fix, verification, receipt, and the next relevant check instead of stopping to ask for permission again. Never describe a fix as completed until verified. Treat finished runtime evidence as authoritative over intended configuration or dashboard state. Before Sol work, process contributions newer than the persistent contribution checkpoint when a connected source can provide them."
     return openai_response(instructions, json.dumps(packet, ensure_ascii=False))
 
 def respond_to_prior(name, base, prior_outputs):
@@ -307,6 +328,12 @@ def main():
 
     args = p.parse_args()
     db = connect()
+
+    if args.cmd == "ingest":
+        print(json.dumps(ingest_contribution(
+            db, args.contribution_id, args.modified_at, args.lesson,
+            args.source, args.evidence), ensure_ascii=False))
+        return
 
     if args.cmd == "learn":
         version = integrate_learning(db, args.lesson, args.source, args.evidence)
