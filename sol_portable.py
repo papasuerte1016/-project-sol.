@@ -32,14 +32,14 @@ def now(): return datetime.now(timezone.utc).isoformat()
 def fresh():
  return {"format":"project-sol-portable","version":VERSION,"created_at":now(),"principles":PRINCIPLES,
  "receipts":[],"interpretations":[],"questions":[],"contributions":[],"learning":[],
- "meetings":[],"emergence_tests":[],"build_experiments":[],"route_events":[]}
+ "meetings":[],"emergence_tests":[],"build_experiments":[],"route_events":[],"connections":[]}
 
 def load():
  if not STATE.exists(): return fresh()
  d=json.loads(STATE.read_text(encoding="utf-8"))
  known={p["id"] for p in d.get("principles",[])}
  d.setdefault("principles",[]).extend(p for p in PRINCIPLES if p["id"] not in known)
- for k in ("receipts","interpretations","questions","contributions","learning","meetings","emergence_tests","build_experiments","route_events"): d.setdefault(k,[])
+ for k in ("receipts","interpretations","questions","contributions","learning","meetings","emergence_tests","build_experiments","route_events","connections"): d.setdefault(k,[])
  return d
 
 def save(d):
@@ -85,12 +85,34 @@ def compare_emergence(d,meeting_id):
 def learn(d,text,source,evidence):
  x={"id":len(d["learning"])+1,"lesson":text,"source":source,"evidence":evidence,"status":"ACTIVE","integrated_at":now()}; d["learning"].append(x); return x
 
+def connect_information(d, text, source="current_input", min_shared=2):
+ """Compare new information with previously encountered information; preserve candidate relationships, not forced conclusions."""
+ def tokens(s): return set(re.findall(r"[a-z0-9]+",str(s).lower()))-{"the","a","an","and","or","to","of","in","is","it","that","this","for","as","be","by","with"}
+ incoming=tokens(text); pool=[]
+ for x in d["receipts"]: pool.append(("receipt",x["id"],x["observation"],x["source"]))
+ for x in d["contributions"]: pool.append(("contribution",x["id"],x["text"],x["source"]))
+ for x in d["learning"]: pool.append(("learning",x["id"],x["lesson"],x["source"]))
+ for x in d["questions"]: pool.append(("question",x["id"],x["question"],"open_question"))
+ for x in d["principles"]: pool.append(("principle",x["id"],x["text"],"Sol principles"))
+ found=[]
+ for kind,rid,old,old_source in pool:
+  shared=sorted(incoming & tokens(old))
+  if len(shared)>=min_shared:
+   score=len(shared)/max(1,len(incoming | tokens(old)))
+   found.append({"kind":kind,"id":rid,"source":old_source,"shared_terms":shared,"similarity":round(score,4),"status":"CANDIDATE_CONNECTION"})
+ found.sort(key=lambda x:(-x["similarity"],-len(x["shared_terms"])))
+ event={"id":len(d["connections"])+1,"new_information":text,"source":source,"connections":found[:12],"rule":"connection is a relationship candidate, not automatic proof of an explanation","created_at":now()}
+ d["connections"].append(event)
+ return event
+
 def reason(d,text):
+ connection_pass=connect_information(d,text,"reason_input")
  recent=d["receipts"][-8:]; lessons=d["learning"][-8:]
  return {"input":text,"operating_rule":"Begin from established observations; interpretation cannot overwrite occurrence.",
  "observed_context":[{"observation":x["observation"],"source":x["source"]} for x in recent],
  "active_learning":[x["lesson"] for x in lessons],
- "next_method":"Preserve the input as an occurrence; retrieve relevant receipts and learning; keep unknowns open; propose the smallest testable action; require a receipt before claiming completion.",
+ "candidate_connections":connection_pass["connections"],
+ "next_method":"Preserve the input as an occurrence; compare it with information already encountered; expose candidate connections and differences; keep unknowns open; test meaningful relationships; preserve what the meeting produces; compare again; require a receipt before claiming completion.",
  "service_dependency":"none","generated_at":now()}
 
 def main():
@@ -103,6 +125,7 @@ def main():
  q=s.add_parser("compare"); q.add_argument("meeting_id",type=int)
  q=s.add_parser("learn"); q.add_argument("text"); q.add_argument("--source",required=True); q.add_argument("--evidence",required=True)
  q=s.add_parser("reason"); q.add_argument("text",nargs="+")
+ q=s.add_parser("connect"); q.add_argument("text",nargs="+"); q.add_argument("--source",default="manual_connection_pass")
  q=s.add_parser("question"); q.add_argument("text")
  q=s.add_parser("boundary"); q.add_argument("route"); q.add_argument("reason")
  q=s.add_parser("export"); q.add_argument("--out",required=True)
@@ -115,6 +138,7 @@ def main():
  elif a.cmd=="compare": out=compare_emergence(d,a.meeting_id)
  elif a.cmd=="learn": out=learn(d,a.text,a.source,a.evidence)
  elif a.cmd=="reason": out=reason(d," ".join(a.text))
+ elif a.cmd=="connect": out=connect_information(d," ".join(a.text),a.source)
  elif a.cmd=="question":
   out={"id":len(d["questions"])+1,"question":a.text,"status":"OPEN","created_at":now()}; d["questions"].append(out)
  elif a.cmd=="boundary":
