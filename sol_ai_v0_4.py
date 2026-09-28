@@ -321,6 +321,13 @@ def main():
     learn.add_argument("--source", required=True)
     learn.add_argument("--evidence", required=True)
 
+    ingest = sub.add_parser("ingest")
+    ingest.add_argument("contribution_id")
+    ingest.add_argument("modified_at")
+    ingest.add_argument("lesson")
+    ingest.add_argument("--source", required=True)
+    ingest.add_argument("--evidence", required=True)
+
     show = sub.add_parser("show")
     show.add_argument("what", choices=["receipts","questions","history","perspectives","transformations"])
 
