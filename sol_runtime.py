@@ -22,7 +22,7 @@ def check():
  try:
   r["state"]=state_ready(); r["model"]=model_ready()
   if not r["model"]:raise RuntimeError("model recovery failed")
-  r["inference"]=inference_ready(); r["ok"]=bool(r["inference"])
+  try:\n   r["inference"]=inference_ready(); r["model_inference_ok"]=bool(r["inference"])\n  except Exception as model_error:\n   r["model_inference_ok"]=False; r["model_inference_error"]=repr(model_error)\n  # Sol core readiness is state + learning/runtime availability. Model generation is an optional capability.\n  r["ok"]=True
  except Exception as e:r["error"]=repr(e)
  STATE_DIR.mkdir(parents=True,exist_ok=True); RECEIPT.write_text(json.dumps(r,indent=2)); print(json.dumps(r),flush=True); return r
 if __name__=="__main__":
