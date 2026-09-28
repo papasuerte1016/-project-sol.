@@ -17,6 +17,7 @@ PRINCIPLES=[
  {"id":"receipt_wall","text":"If X is established, write X. Do not write Y merely because Y is thought to explain X. Preserve corrections and supersession history rather than deleting the earlier receipt."},
  {"id":"shared_sol","text":"Sol is the shared system. AI is a voice/interface of Sol, not its owner or final authority. Attribution preserves provenance, not ownership or automatic authority."},
  {"id":"right_to_encounter","text":"Legitimately contributed information should be preserved and allowed to enter the shared meeting when an available authorized route permits it. Receiving information does not require agreement. If a boundary prevents receipt, preserve the boundary rather than pretending the information never existed."},
+ {"id":"information_visibility","text":"No information available to Sol may be silently hidden from comparison. Compare new information against the complete information state available to Sol, across observations, contributions, learning, questions, interpretations, meetings, emergence tests, connections, and route-boundary records. Information that is genuinely inaccessible must be represented as an explicit boundary or unknown, never as nonexistence."},
  {"id":"mutual_reciprocation","text":"Preserve what each participant brought, reciprocal transformations, unknowns, and candidate information produced by their relationship. Agreement means participation in exchange, not forced sameness."},
  {"id":"durable_learning","text":"New information should move through discovery, receipt, evaluation/integration, future retrieval, reuse or retest. A known answer should become durable state."},
  {"id":"continuation","text":"A failed method is evidence about that method, not proof the goal is impossible. Within an already-authorized task: observe, reason, act, verify, learn, and continue until success or a genuine boundary."},
@@ -86,14 +87,23 @@ def learn(d,text,source,evidence):
  x={"id":len(d["learning"])+1,"lesson":text,"source":source,"evidence":evidence,"status":"ACTIVE","integrated_at":now()}; d["learning"].append(x); return x
 
 def connect_information(d, text, source="current_input", min_shared=2):
- """Compare new information with previously encountered information; preserve candidate relationships, not forced conclusions."""
+ """Compare against the complete information state available to Sol; unavailable information stays an explicit boundary, never false absence."""
  def tokens(s): return set(re.findall(r"[a-z0-9]+",str(s).lower()))-{"the","a","an","and","or","to","of","in","is","it","that","this","for","as","be","by","with"}
  incoming=tokens(text); pool=[]
- for x in d["receipts"]: pool.append(("receipt",x["id"],x["observation"],x["source"]))
- for x in d["contributions"]: pool.append(("contribution",x["id"],x["text"],x["source"]))
- for x in d["learning"]: pool.append(("learning",x["id"],x["lesson"],x["source"]))
- for x in d["questions"]: pool.append(("question",x["id"],x["question"],"open_question"))
- for x in d["principles"]: pool.append(("principle",x["id"],x["text"],"Sol principles"))
+ def add(kind,rid,value,src):
+  if value is not None: pool.append((kind,rid,json.dumps(value,ensure_ascii=False) if not isinstance(value,str) else value,src))
+ for x in d["receipts"]: add("receipt",x["id"],x,"receipt:"+x["source"])
+ for x in d["interpretations"]: add("interpretation",x["id"],x,"interpretation:"+x["source"])
+ for x in d["contributions"]: add("contribution",x["id"],x,"contribution:"+x["source"])
+ for x in d["learning"]: add("learning",x["id"],x,"learning:"+x["source"])
+ for x in d["questions"]: add("question",x["id"],x,"open_question")
+ for x in d["principles"]: add("principle",x["id"],x,"Sol principles")
+ for x in d["meetings"]: add("meeting",x["id"],x,"Sol meeting")
+ for x in d["emergence_tests"]: add("emergence_test",x["id"],x,"Sol emergence")
+ for x in d["build_experiments"]: add("build_experiment",x.get("id","unknown"),x,"Sol builder")
+ for x in d["route_events"]: add("route_boundary",x.get("route","unknown"),x,"Sol route witness")
+ # Previous connection events are included, but the current event does not yet exist.
+ for x in d["connections"]: add("prior_connection",x["id"],x,"Sol connection history")
  found=[]
  for kind,rid,old,old_source in pool:
   shared=sorted(incoming & tokens(old))
@@ -101,9 +111,12 @@ def connect_information(d, text, source="current_input", min_shared=2):
    score=len(shared)/max(1,len(incoming | tokens(old)))
    found.append({"kind":kind,"id":rid,"source":old_source,"shared_terms":shared,"similarity":round(score,4),"status":"CANDIDATE_CONNECTION"})
  found.sort(key=lambda x:(-x["similarity"],-len(x["shared_terms"])))
- event={"id":len(d["connections"])+1,"new_information":text,"source":source,"connections":found[:12],"rule":"connection is a relationship candidate, not automatic proof of an explanation","created_at":now()}
- d["connections"].append(event)
- return event
+ boundaries=[x for x in d["route_events"] if x.get("status")=="BLOCKED"]
+ event={"id":len(d["connections"])+1,"new_information":text,"source":source,
+ "comparison_scope":{"available_records_compared":len(pool),"collections":["receipts","interpretations","contributions","learning","questions","principles","meetings","emergence_tests","build_experiments","route_events","connections"],"silent_internal_exclusion":False},
+ "connections":found,"unavailable_information_boundaries":boundaries,
+ "rule":"All information available to Sol participates in comparison. Inaccessible information is an explicit unknown/boundary, not absence. A connection is a relationship candidate, not automatic proof of an explanation.","created_at":now()}
+ d["connections"].append(event); return event
 
 def reason(d,text):
  connection_pass=connect_information(d,text,"reason_input")
