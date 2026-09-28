@@ -72,7 +72,7 @@ class H(BaseHTTPRequestHandler):
         msg=d.get("message",[""])[0].strip()[:5000]
         if not msg: return self.send(400,page("<p>Message is required.</p>"))
         c=db(); cur=c.execute("INSERT INTO messages(created,name,message) VALUES(?,?,?)",(int(time.time()),name,msg)); mid=cur.lastrowid; c.commit(); c.close()
-        return self.send(200,page(f'<h1>Received 🔔</h1><p>Your Project Sol message is <b>#{mid}</b>.</p><p><a href="/messages">See visitor messages</a> · <a href="/">Send another</a></p>'))
+        return self.send(200,page(f'<h1>Received 🔔</h1><p>Your Project Sol message is <b>#{mid}</b>.</p><p><a href="/messages">Check for a Sol response</a> · <a href="/">Send another</a></p>'))
     def log_message(self, fmt,*args): pass
 
 ThreadingHTTPServer(("0.0.0.0",PORT),H).serve_forever()
