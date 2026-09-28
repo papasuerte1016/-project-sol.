@@ -67,10 +67,31 @@ CREATE TABLE IF NOT EXISTS transformation_edges (
 def now():
     return datetime.now(timezone.utc).isoformat()
 
+BOOTSTRAP_LEARNING = [
+    {"lesson":"Do not confuse a failed method with an impossible goal. Preserve the failed-route receipt, search for another permitted route, test it, and continue.","source":"Project Sol shared learning","evidence":"Railway/Ollama repair chain 2026-09-28"},
+    {"lesson":"An unresolved question exposed during an already-authorized task becomes the next work item automatically; resolve, verify, preserve the receipt, and continue.","source":"Steven + Wise","evidence":"Project Sol continuation rule 2026-09-28"},
+    {"lesson":"Finished runtime evidence outranks intended configuration or dashboard badges. Intended, attempted, completed, and verified are distinct states.","source":"Project Sol shared learning","evidence":"Railway bind/debug receipts 2026-09-28"},
+    {"lesson":"Durable learning requires discovery as well as storage: notice new contributions, evaluate/integrate them, preserve provenance, retrieve them later, and test reuse.","source":"Project Sol shared learning","evidence":"Contribution-discovery test 2026-09-28"},
+    {"lesson":"A known answer should become durable state so the system does not repeatedly rediscover the same resolved question after restart.","source":"Steven","evidence":"Persistence correction 2026-09-28"}
+]
+
+def bootstrap_learning(db):
+    raw, version = get_state(db, "integrated_learning")
+    lessons = json.loads(raw) if raw else []
+    known={x.get("lesson") for x in lessons}
+    changed=False
+    for item in BOOTSTRAP_LEARNING:
+        if item["lesson"] not in known:
+            lessons.append({**item,"status":"ACTIVE","integrated_at":now()})
+            changed=True
+    if changed:
+        set_state(db,"integrated_learning",json.dumps(lessons,ensure_ascii=False),version)
+
 def connect():
     db = sqlite3.connect(DB)
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
+    bootstrap_learning(db)
     return db
 
 def get_state(db, key):
