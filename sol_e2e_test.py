@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""One-shot Project Sol SCU -> model -> receipt integration proof."""
+"""Project Sol service startup probe: model test + durable process."""
 import json
+import time
 import sol_compute_token as token
 import sol_model_adapter as model
 
@@ -8,7 +9,12 @@ ACCOUNT="sol-test"
 PROMPT="Reply exactly: SOL MODEL ONLINE"
 
 issue=token.mint(ACCOUNT,5,"end-to-end model test allocation")
-result=model.execute(ACCOUNT,PROMPT)
+try:
+    result=model.execute(ACCOUNT,PROMPT)
+    model_ok=True
+except Exception as exc:
+    result={"ok":False,"error":str(exc)}
+    model_ok=False
 verification=token.verify()
 out={
   "ok": model_ok,
@@ -18,4 +24,9 @@ out={
   "ledger_valid": verification["valid"],
   "ledger_verification": verification,
 }
-print(json.dumps(out,indent=2),flush=True)\n# Railway service mode: preserve the process after the startup probe so a\n# temporarily unavailable model edge does not crash the Sol AI service.\nwhile True:\n    time.sleep(3600)
+print(json.dumps(out,indent=2),flush=True)
+
+# Keep the Railway service alive even if the model edge is temporarily down.
+# The failed probe remains visible as a receipt instead of killing the service.
+while True:
+    time.sleep(3600)
