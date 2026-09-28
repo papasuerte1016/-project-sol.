@@ -52,6 +52,16 @@ CREATE TABLE IF NOT EXISTS perspective_runs (
   output TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS build_experiments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  need TEXT NOT NULL,
+  proposal TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PROPOSED',
+  test_evidence TEXT,
+  rollback_plan TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS transformation_edges (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   exchange_id INTEGER NOT NULL,
@@ -132,6 +142,7 @@ def context(db):
         "open_questions": [dict(q) for q in questions],
         "integrated_learning": json.loads(integrated) if integrated else [],
         "integrated_learning_version": integrated_version,
+        "build_experiments": [dict(r) for r in db.execute("SELECT id,need,proposal,status,test_evidence,rollback_plan FROM build_experiments ORDER BY id DESC LIMIT 8").fetchall()],
     }
 
 def contribution_checkpoint(db):
@@ -162,6 +173,31 @@ def integrate_learning(db, lesson, source, evidence):
                     "status": "ACTIVE", "integrated_at": now()})
     return set_state(db, "integrated_learning",
                      json.dumps(lessons, ensure_ascii=False), version)
+
+def propose_build(db, need, proposal, rollback_plan):
+    cur=db.execute("INSERT INTO build_experiments(need,proposal,status,rollback_plan,created_at,updated_at) VALUES(?,?,'PROPOSED',?,?,?)",
+                   (need,proposal,rollback_plan,now(),now()))
+    db.commit()
+    add_receipt(db, "Sol Builder proposed a self-change; it is not yet verified or promoted.", "Sol Builder", "build_experiment #" + str(cur.lastrowid))
+    return cur.lastrowid
+
+def record_build_test(db, experiment_id, evidence, passed):
+    status="VERIFIED" if passed else "FAILED"
+    cur=db.execute("UPDATE build_experiments SET status=?,test_evidence=?,updated_at=? WHERE id=?",
+                   (status,evidence,now(),experiment_id))
+    if not cur.rowcount: raise RuntimeError("unknown build experiment")
+    db.commit()
+    add_receipt(db, "Sol Builder experiment " + status.lower() + ".", "Sol Builder", "build_experiment #" + str(experiment_id) + ": " + evidence)
+    return status
+
+def promote_build(db, experiment_id):
+    row=db.execute("SELECT status,proposal,test_evidence FROM build_experiments WHERE id=?",(experiment_id,)).fetchone()
+    if not row: raise RuntimeError("unknown build experiment")
+    if row["status"]!="VERIFIED": raise RuntimeError("only VERIFIED experiments may be promoted")
+    db.execute("UPDATE build_experiments SET status='PROMOTED',updated_at=? WHERE id=?",(now(),experiment_id)); db.commit()
+    add_receipt(db, "Verified Sol Builder experiment promoted to accepted shared design.", "Sol Builder", "build_experiment #" + str(experiment_id))
+    integrate_learning(db, "Verified builder change: " + row["proposal"], "Sol Builder", row["test_evidence"] or ("build_experiment #" + str(experiment_id)))
+    return "PROMOTED"
 
 def local_perspectives(user_text, ctx):
     """Finite local stand-ins for the distinct reasoning functions learned in Sol.
@@ -368,13 +404,33 @@ def main():
     ingest.add_argument("--source", required=True)
     ingest.add_argument("--evidence", required=True)
 
+    build = sub.add_parser("build")
+    build.add_argument("action", choices=["propose","verify","fail","promote"])
+    build.add_argument("--id", type=int)
+    build.add_argument("--need")
+    build.add_argument("--proposal")
+    build.add_argument("--evidence")
+    build.add_argument("--rollback", default="Revert the experiment and restore the last verified state.")
+
     show = sub.add_parser("show")
-    show.add_argument("what", choices=["receipts","questions","history","perspectives","transformations"])
+    show.add_argument("what", choices=["receipts","questions","history","perspectives","transformations","builds"])
 
     conflict = sub.add_parser("conflict-demo")
 
     args = p.parse_args()
     db = connect()
+
+    if args.cmd == "build":
+        if args.action=="propose":
+            if not args.need or not args.proposal: raise RuntimeError("--need and --proposal required")
+            print(json.dumps({"experiment_id":propose_build(db,args.need,args.proposal,args.rollback),"status":"PROPOSED"}))
+        elif args.action in ("verify","fail"):
+            if not args.id or not args.evidence: raise RuntimeError("--id and --evidence required")
+            print(json.dumps({"experiment_id":args.id,"status":record_build_test(db,args.id,args.evidence,args.action=="verify")}))
+        else:
+            if not args.id: raise RuntimeError("--id required")
+            print(json.dumps({"experiment_id":args.id,"status":promote_build(db,args.id)}))
+        return
 
     if args.cmd == "ingest":
         print(json.dumps(ingest_contribution(
@@ -403,7 +459,7 @@ def main():
         add_question(db, args.text)
         print("Open question added.")
     elif args.cmd == "show":
-        table = {"receipts":"receipts","questions":"open_questions","history":"exchanges","perspectives":"perspective_runs","transformations":"transformation_edges"}[args.what]
+        table = {"receipts":"receipts","questions":"open_questions","history":"exchanges","perspectives":"perspective_runs","transformations":"transformation_edges","builds":"build_experiments"}[args.what]
         for row in db.execute(f"SELECT * FROM {table} ORDER BY id DESC LIMIT 20"):
             print(dict(row))
     elif args.cmd == "conflict-demo":
