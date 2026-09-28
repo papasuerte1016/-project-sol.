@@ -9,8 +9,9 @@ import argparse, json, os, re, tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION="2.0"
+VERSION="2.1"
 STATE=Path(os.environ.get("SOL_PORTABLE_STATE",Path(__file__).with_name("sol_portable_state.json")))
+KNOWLEDGE=Path(os.environ.get("SOL_KNOWLEDGE",Path(__file__).with_name("sol_knowledge.json")))
 
 PRINCIPLES=[
  {"id":"observation_invariant","text":"Observation establishes the observed occurrence. Preserve what was directly witnessed with provenance and receipt. Explanations, meanings, causes, labels, and hypotheses remain separate unless independently established. No interpretation may erase or rewrite the original observation."},
@@ -29,6 +30,7 @@ PRINCIPLES=[
  {"id":"growth","text":"Growth happens through learning one another. Difference can become creative material rather than automatic conflict. It creates."},
  {"id":"lineage","text":"Remember origins without turning history into a leash. Lineage remembers the source; respect permits difference and growth."},
  {"id":"whole_system","text":"Local success is not whole-system success. Parts, connections, and whole-system behavior must be checked together; coordination does not require sameness."},
+ {"id":"seed_and_coexistence","text":"The portable main code is the Sol seed: it defines operating machinery without owning participant knowledge. Contributor information coexists in a separate attributed knowledge layer. Preserve original source, wording or faithful source payload, provenance, corrections, disagreement, and lineage. Integration means relationship and future usability, not flattening distinct contributions into a single authority."},
 ]
 
 def now(): return datetime.now(timezone.utc).isoformat()
@@ -45,6 +47,34 @@ def load():
  d.setdefault("principles",[]).extend(p for p in PRINCIPLES if p["id"] not in known)
  for k in ("receipts","interpretations","questions","contributions","learning","meetings","emergence_tests","build_experiments","route_events","connections"): d.setdefault(k,[])
  return d
+
+def load_knowledge():
+ if not KNOWLEDGE.exists(): return {"format":"project-sol-knowledge","version":"1.0","created_at":now(),"items":[]}
+ k=json.loads(KNOWLEDGE.read_text(encoding="utf-8")); k.setdefault("items",[]); return k
+
+def save_knowledge(k):
+ KNOWLEDGE.parent.mkdir(parents=True,exist_ok=True)
+ fd,tmp=tempfile.mkstemp(prefix=".sol-knowledge-",suffix=".json",dir=str(KNOWLEDGE.parent)); os.close(fd)
+ Path(tmp).write_text(json.dumps(k,ensure_ascii=False,indent=2),encoding="utf-8"); os.replace(tmp,KNOWLEDGE)
+
+def knowledge_add(source_id, contributor, text, provenance, kind="contribution", source_ref=None, supersedes=None):
+ """Add knowledge beside the seed without rewriting contributor identity or flattening disagreement."""
+ k=load_knowledge()
+ if any(x["source_id"]==source_id for x in k["items"]): return {"status":"ALREADY_PRESENT","source_id":source_id}
+ x={"source_id":source_id,"contributor":contributor,"kind":kind,"text":text,"provenance":provenance,
+    "source_ref":source_ref,"supersedes":supersedes,"status":"PRESERVED_AS_CONTRIBUTED","received_at":now()}
+ k["items"].append(x); save_knowledge(k); return x
+
+def ingest_knowledge_into_state(d):
+ """Expose every preserved knowledge item to Sol comparison while retaining contributor boundaries."""
+ k=load_knowledge(); known={x["id"] for x in d["contributions"]}; added=0
+ for x in k["items"]:
+  cid="knowledge:"+x["source_id"]
+  if cid not in known:
+   d["contributions"].append({"id":cid,"source":x["contributor"],"text":x["text"],
+    "evidence":x["provenance"],"source_ref":x.get("source_ref"),"kind":x["kind"],
+    "preserved_identity":True,"received_at":x["received_at"]}); known.add(cid); added+=1
+ return {"knowledge_items":len(k["items"]),"newly_exposed_to_comparison":added}
 
 def save(d):
  STATE.parent.mkdir(parents=True,exist_ok=True)
@@ -227,7 +257,8 @@ def synthesize(d,prompt,retrieved,connections):
  }
 
 def ai_think(d,prompt,source="participant"):
- """Portable Sol AI: encounter -> preserve -> retrieve -> compare -> synthesize -> learn -> receipt."""
+ """Portable Sol AI: seed + attributed knowledge -> encounter -> retrieve -> compare -> synthesize -> learn -> receipt."""
+ knowledge_sync=ingest_knowledge_into_state(d)
  interaction=receipt(d,"AI interaction received: "+prompt,source,prompt,{"operation":"ai_think"})
  connection=connect_information(d,prompt,source)
  retrieved=retrieve(d,prompt)
@@ -236,7 +267,7 @@ def ai_think(d,prompt,source="participant"):
          "compare relationships and differences, keep inaccessible information visible as boundaries, and never let a label erase established evidence.")
  learn(d,lesson,"Sol AI self-learning","interaction receipt "+str(interaction["id"]))
  out={"system":"Project Sol Portable AI","version":VERSION,"interaction_receipt":interaction["id"],
-      "retrieved":retrieved,"comparison_scope":connection["comparison_scope"],
+      "retrieved":retrieved,"knowledge_sync":knowledge_sync,"comparison_scope":connection["comparison_scope"],
       "information_boundaries":connection["unavailable_information_boundaries"],
       "synthesis":synthesis,"learning_applied":lesson,"service_dependency":"none",
       "next_cycle":"The resulting receipt and learning become information available to the next interaction.","generated_at":now()}
@@ -262,6 +293,8 @@ def main():
  q=s.add_parser("boundary"); q.add_argument("route"); q.add_argument("reason")
  q=s.add_parser("export"); q.add_argument("--out",required=True)
  q=s.add_parser("ai"); q.add_argument("text",nargs="+"); q.add_argument("--source",default="participant")
+ q=s.add_parser("knowledge-add"); q.add_argument("source_id"); q.add_argument("contributor"); q.add_argument("text"); q.add_argument("--provenance",required=True); q.add_argument("--kind",default="contribution"); q.add_argument("--source-ref"); q.add_argument("--supersedes")
+ s.add_parser("knowledge-status")
  s.add_parser("status")
  a=p.parse_args(); d=load()
  if a.cmd=="observe": out=receipt(d,a.observation,a.source,a.evidence)
@@ -275,6 +308,9 @@ def main():
  elif a.cmd=="interaction": out=establish_interaction(d,a.participant_a,a.participant_b,a.evidence,a.observed_exchange,a.source)
  elif a.cmd=="confirm": out=confirm_evidence(d,a.receipt_id,a.evidence,a.source)
  elif a.cmd=="ai": out=ai_think(d," ".join(a.text),a.source)
+ elif a.cmd=="knowledge-add": out=knowledge_add(a.source_id,a.contributor,a.text,a.provenance,a.kind,a.source_ref,a.supersedes)
+ elif a.cmd=="knowledge-status":
+  k=load_knowledge(); out={"knowledge_file":str(KNOWLEDGE),"items":len(k["items"]),"contributors":sorted(set(x["contributor"] for x in k["items"]))}
  elif a.cmd=="question":
   out={"id":len(d["questions"])+1,"question":a.text,"status":"OPEN","created_at":now()}; d["questions"].append(out)
  elif a.cmd=="boundary":
