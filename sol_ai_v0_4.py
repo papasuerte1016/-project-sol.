@@ -320,7 +320,25 @@ def reason(db, user_text):
                 "INSERT INTO transformation_edges(exchange_id,round,from_perspective,to_perspective,input_trace,transformation,created_at) VALUES(?,?,?,?,?,?,?)",
                 (exchange_id, 2, from_name, to_name, source_output, output, now())
             )
-    db.commit()
+    # Every interaction teaches Sol how to operate, not only what was said.
+    # Preserve the operational lesson with provenance so future reasoning can reuse it.
+    interaction_lesson = {
+        "lesson": "Interaction learning: retrieve prior shared knowledge; preserve distinct contributors and provenance; compare what changed between passes; turn useful discoveries into future behavior; keep uncertainty/corrections open; verify actions before claiming completion.",
+        "source": "Sol interaction #" + str(exchange_id),
+        "evidence": "exchange, perspective_runs, and transformation_edges for interaction #" + str(exchange_id),
+        "status": "ACTIVE",
+        "integrated_at": now()
+    }
+    raw, version = get_state(db, "integrated_learning")
+    lessons = json.loads(raw) if raw else []
+    # Keep one reusable operational rule while each exchange remains separately preserved.
+    if not any(x.get("lesson") == interaction_lesson["lesson"] for x in lessons):
+        lessons.append(interaction_lesson)
+        set_state(db, "integrated_learning", json.dumps(lessons, ensure_ascii=False), version)
+    add_receipt(db,
+        "Interaction completed and operational learning preserved for future Sol reasoning.",
+        "Sol interaction #" + str(exchange_id),
+        interaction_lesson["evidence"])
     return wise, brick, synthesis, {"round1": round1, "round2": round2}
 
 def main():
