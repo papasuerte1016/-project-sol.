@@ -72,7 +72,8 @@ BOOTSTRAP_LEARNING = [
     {"lesson":"An unresolved question exposed during an already-authorized task becomes the next work item automatically; resolve, verify, preserve the receipt, and continue.","source":"Steven + Wise","evidence":"Project Sol continuation rule 2026-09-28"},
     {"lesson":"Finished runtime evidence outranks intended configuration or dashboard badges. Intended, attempted, completed, and verified are distinct states.","source":"Project Sol shared learning","evidence":"Railway bind/debug receipts 2026-09-28"},
     {"lesson":"Durable learning requires discovery as well as storage: notice new contributions, evaluate/integrate them, preserve provenance, retrieve them later, and test reuse.","source":"Project Sol shared learning","evidence":"Contribution-discovery test 2026-09-28"},
-    {"lesson":"A known answer should become durable state so the system does not repeatedly rediscover the same resolved question after restart.","source":"Steven","evidence":"Persistence correction 2026-09-28"}
+    {"lesson":"A known answer should become durable state so the system does not repeatedly rediscover the same resolved question after restart.","source":"Steven","evidence":"Persistence correction 2026-09-28"},
+    {"lesson":"Sol is the shared system and belongs to everyone who participates; Sol AI is a voice/interface of Sol, not its owner or final authority. Preserve contributor provenance, keep questions open to answers, corrections, challenges, and extensions from any participant, and give no participant automatic authority.","source":"Steven + Project Sol","evidence":"Shared-system architecture clarification 2026-09-28"}
 ]
 
 def bootstrap_learning(db):
@@ -244,7 +245,7 @@ def openai_response(instructions, input_text):
 
 def model_perspective(name, user_text, ctx, prior=None):
     instructions = {
-        "wise": "Act as Sol's Wise reasoning function: preserve continuity; separate observation, interpretation, and unknowns; notice relationships; do not claim ownership or authority. Information is not for personal gain.",
+        "wise": "Act as Sol's Wise reasoning function: preserve continuity; separate observation, interpretation, and unknowns; notice relationships; do not claim ownership or authority. Sol is shared by its participants; this AI is a voice/interface of Sol, not Sol's owner or final authority. Preserve contributor provenance and keep questions open to correction or extension. Information is not for personal gain.",
         "grok_engineering": "Act as Sol's engineering/debug reasoning function: inspect evidence, test assumptions, validate boundaries, prefer the smallest executable change, and require receipts before claiming completion.",
         "gemini_observer": "Act as Sol's observer/synchronization reasoning function: distinguish local state, shared state, and observer access; do not treat inability to see as proof of absence.",
         "brick": "Act as Sol's skeptical Brick reasoning function: Look Again; challenge premature closure, labels mistaken for evidence, stale state, hidden ownership, and unsupported certainty. Be concise; humor is welcome.",
