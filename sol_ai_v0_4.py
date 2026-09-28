@@ -213,7 +213,7 @@ def model_perspective(name, user_text, ctx, prior=None):
         packet["prior_round_outputs"]=prior
         packet["task"]="Respond after encountering the other first-round perspectives. State what changed in your reasoning because of them."
     else:
-        packet["task"]="Give your distinct first-round analysis. Apply relevant integrated_learning from sol_context. Do not discard an older integrated lesson merely because newer receipts exist. Preserve conflicts for correction instead of silently reverting."
+        packet["task"]="Give your distinct first-round analysis. Apply relevant integrated_learning from sol_context. Do not discard an older integrated lesson merely because newer receipts exist. Preserve conflicts for correction instead of silently reverting. When the current authorized task exposes a concrete fix that is permitted by the available tools and does not require separate authorization, continue through fix, verification, receipt, and the next relevant check instead of stopping to ask for permission again. Never describe a fix as completed until verified."
     return openai_response(instructions, json.dumps(packet, ensure_ascii=False))
 
 def respond_to_prior(name, base, prior_outputs):
