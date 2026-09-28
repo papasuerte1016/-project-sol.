@@ -104,10 +104,21 @@ def add_question(db, question):
 def context(db):
     receipts = db.execute("SELECT observation,source,evidence FROM receipts ORDER BY id DESC LIMIT 8").fetchall()
     questions = db.execute("SELECT question,status FROM open_questions WHERE status!='ANSWERED' ORDER BY id DESC LIMIT 8").fetchall()
+    integrated, integrated_version = get_state(db, "integrated_learning")
     return {
         "receipts": [dict(r) for r in receipts],
         "open_questions": [dict(q) for q in questions],
+        "integrated_learning": json.loads(integrated) if integrated else [],
+        "integrated_learning_version": integrated_version,
     }
+
+def integrate_learning(db, lesson, source, evidence):
+    raw, version = get_state(db, "integrated_learning")
+    lessons = json.loads(raw) if raw else []
+    lessons.append({"lesson": lesson, "source": source, "evidence": evidence,
+                    "status": "ACTIVE", "integrated_at": now()})
+    return set_state(db, "integrated_learning",
+                     json.dumps(lessons, ensure_ascii=False), version)
 
 def local_perspectives(user_text, ctx):
     """Finite local stand-ins for the distinct reasoning functions learned in Sol.
