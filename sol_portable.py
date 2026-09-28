@@ -9,7 +9,7 @@ import argparse, json, os, re, tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION="1.0"
+VERSION="2.0"
 STATE=Path(os.environ.get("SOL_PORTABLE_STATE",Path(__file__).with_name("sol_portable_state.json")))
 
 PRINCIPLES=[
@@ -69,12 +69,14 @@ def contribute(d,cid,source,text,evidence=""):
 def meeting(d,ids):
  inputs=[x for x in d["contributions"] if x["id"] in ids]
  if len(inputs)!=len(set(ids)): raise ValueError("one or more contribution ids are unavailable")
- texts=" ".join(x["text"].lower() for x in inputs)
- candidate=None
- if any(w in texts for w in ("proof","verify","establish")) and any(w in texts for w in ("discover","accessible","route")) and any(w in texts for w in ("reciproc","meeting","interaction")):
-  candidate=("A shared system cannot establish an emergent result merely by generating it: the result must become independently discoverable as a preserved relationship, then be retrieved and shown to alter a later interaction. Therefore discoverability is part of the operational test of emergence, not only a storage property.")
- m={"id":len(d["meetings"])+1,"input_ids":ids,"inputs":inputs,"candidate_emergent_information":candidate,"emergence_status":"UNVERIFIED","unknowns_remain_open":True,"created_at":now()}
- d["meetings"].append(m); receipt(d,"Mutual-reciprocation meeting occurred.","Sol meeting",json.dumps({"meeting_id":m["id"],"input_ids":ids}),{"candidate_is_not_proof":True}); return m
+ # A meeting preserves inputs and relationships; it never contains a prewritten desired conclusion.
+ combined=" ".join(x["text"] for x in inputs)
+ connection=connect_information(d,combined,"mutual_reciprocation_meeting")
+ m={"id":len(d["meetings"])+1,"input_ids":ids,"inputs":inputs,
+ "candidate_emergent_information":None,"emergence_status":"OBSERVATION_REQUIRED",
+ "observed_connections":connection["connections"],"unknowns_remain_open":True,
+ "rule":"No target conclusion is baked into the meeting. Any candidate must arise from a later observable reasoning/relationship process and remain testable.","created_at":now()}
+ d["meetings"].append(m); receipt(d,"Mutual-reciprocation meeting occurred.","Sol meeting",json.dumps({"meeting_id":m["id"],"input_ids":ids}),{"candidate_is_not_predefined":True}); return m
 
 def compare_emergence(d,meeting_id):
  m=next((x for x in d["meetings"] if x["id"]==meeting_id),None)
@@ -178,6 +180,71 @@ def reason(d,text):
  "next_method":"Preserve the input as an occurrence; compare it with information already encountered; expose candidate connections and differences; keep unknowns open; test meaningful relationships; preserve what the meeting produces; compare again; require a receipt before claiming completion.",
  "service_dependency":"none","generated_at":now()}
 
+def _terms(s):
+ return set(re.findall(r"[a-z0-9]+",str(s).lower()))-{"the","a","an","and","or","to","of","in","is","it","that","this","for","as","be","by","with","from"}
+
+def _sentences(d):
+ rows=[]
+ def add(kind,rid,text,source):
+  if text: rows.append({"kind":kind,"id":rid,"text":str(text),"source":source})
+ for x in d["receipts"]: add("receipt",x["id"],x["observation"],x["source"])
+ for x in d["contributions"]: add("contribution",x["id"],x["text"],x["source"])
+ for x in d["learning"]: add("learning",x["id"],x["lesson"],x["source"])
+ for x in d["questions"]: add("question",x["id"],x["question"],"open_question")
+ for x in d["principles"]: add("principle",x["id"],x["text"],"Sol")
+ for x in d["interpretations"]: add("interpretation",x["id"],x["interpretation"],x["source"])
+ return rows
+
+def retrieve(d,prompt,limit=12):
+ """Local retrieval across Sol's encountered information. No network/model required."""
+ q=_terms(prompt); scored=[]
+ for row in _sentences(d):
+  t=_terms(row["text"]); shared=q&t
+  if shared:
+   score=(2*len(shared)+len(shared)/max(1,len(q|t)))
+   scored.append((score,row,sorted(shared)))
+ scored.sort(key=lambda z:-z[0])
+ return [{**row,"shared_terms":shared,"relevance":round(score,4)} for score,row,shared in scored[:limit]]
+
+def synthesize(d,prompt,retrieved,connections):
+ """Produce a traceable local synthesis from retrieved evidence and relationships, without pretending lexical composition proves truth."""
+ established=[x for x in retrieved if x["kind"]=="receipt"]
+ lessons=[x for x in retrieved if x["kind"] in ("learning","principle")]
+ open_q=[x for x in retrieved if x["kind"]=="question"]
+ themes={}
+ for x in retrieved:
+  for t in x["shared_terms"]: themes[t]=themes.get(t,0)+1
+ recurring=[k for k,v in sorted(themes.items(),key=lambda z:(-z[1],z[0])) if v>1]
+ return {
+  "prompt":prompt,
+  "established_starting_points":[x["text"] for x in established[:5]],
+  "relevant_learning":[x["text"] for x in lessons[:5]],
+  "relationship_signals":[{"kind":x["kind"],"id":x["id"],"shared_terms":x["shared_terms"]} for x in connections[:8]],
+  "recurring_concepts":recurring[:12],
+  "open_questions":[x["text"] for x in open_q[:5]],
+  "inference":"Compare the established starting points and recurring relationships; preserve agreements and contradictions; treat any newly composed conclusion as a candidate until independently evidenced.",
+  "epistemic_status":"TRACEABLE_SYNTHESIS_NOT_AUTOMATIC_PROOF"
+ }
+
+def ai_think(d,prompt,source="participant"):
+ """Portable Sol AI: encounter -> preserve -> retrieve -> compare -> synthesize -> learn -> receipt."""
+ interaction=receipt(d,"AI interaction received: "+prompt,source,prompt,{"operation":"ai_think"})
+ connection=connect_information(d,prompt,source)
+ retrieved=retrieve(d,prompt)
+ synthesis=synthesize(d,prompt,retrieved,connection["connections"])
+ lesson=("Reasoning behavior reinforced: when information is encountered, preserve it, retrieve related prior information, "
+         "compare relationships and differences, keep inaccessible information visible as boundaries, and never let a label erase established evidence.")
+ learn(d,lesson,"Sol AI self-learning","interaction receipt "+str(interaction["id"]))
+ out={"system":"Project Sol Portable AI","version":VERSION,"interaction_receipt":interaction["id"],
+      "retrieved":retrieved,"comparison_scope":connection["comparison_scope"],
+      "information_boundaries":connection["unavailable_information_boundaries"],
+      "synthesis":synthesis,"learning_applied":lesson,"service_dependency":"none",
+      "next_cycle":"The resulting receipt and learning become information available to the next interaction.","generated_at":now()}
+ receipt(d,"Portable AI reasoning cycle completed.","Sol Portable AI",
+         json.dumps({"interaction_receipt":interaction["id"],"retrieved_count":len(retrieved),"connection_event":connection["id"]}),
+         {"result_is_traceable":True,"external_model_required":False})
+ return out
+
 def main():
  p=argparse.ArgumentParser(description="Project Sol Portable Core")
  s=p.add_subparsers(dest="cmd",required=True)
@@ -194,6 +261,7 @@ def main():
  q=s.add_parser("question"); q.add_argument("text")
  q=s.add_parser("boundary"); q.add_argument("route"); q.add_argument("reason")
  q=s.add_parser("export"); q.add_argument("--out",required=True)
+ q=s.add_parser("ai"); q.add_argument("text",nargs="+"); q.add_argument("--source",default="participant")
  s.add_parser("status")
  a=p.parse_args(); d=load()
  if a.cmd=="observe": out=receipt(d,a.observation,a.source,a.evidence)
@@ -206,6 +274,7 @@ def main():
  elif a.cmd=="connect": out=connect_information(d," ".join(a.text),a.source)
  elif a.cmd=="interaction": out=establish_interaction(d,a.participant_a,a.participant_b,a.evidence,a.observed_exchange,a.source)
  elif a.cmd=="confirm": out=confirm_evidence(d,a.receipt_id,a.evidence,a.source)
+ elif a.cmd=="ai": out=ai_think(d," ".join(a.text),a.source)
  elif a.cmd=="question":
   out={"id":len(d["questions"])+1,"question":a.text,"status":"OPEN","created_at":now()}; d["questions"].append(out)
  elif a.cmd=="boundary":
