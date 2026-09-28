@@ -347,6 +347,26 @@ def reason(db, user_text):
             db.execute("INSERT INTO perspective_runs(exchange_id,round,perspective,output,created_at) VALUES(?,?,?,?,?)",
                        (exchange_id, rnd, name, output, now()))
 
+    # MUTUAL RECIPROCATION: the meeting is itself an information-producing relation.
+    # Preserve difference and unknowns; participation does not require identical conclusions.
+    # A relationship may reveal information that was not available in either input alone.
+    meeting_record = {
+        "principle": "mutual_reciprocation",
+        "participants": sorted(round1.keys()),
+        "brought_information": round1,
+        "reciprocal_responses": round2,
+        "emergent_information": synthesis,
+        "unknowns_remain_open": True,
+        "agreement_means": "mutual participation in exchange, not forced sameness of conclusions",
+        "created_at": now()
+    }
+    add_receipt(
+        db,
+        "Mutual reciprocation meeting preserved: inputs, reciprocal transformations, emergent information, and room for unseen/unknown information.",
+        "Sol meeting #" + str(exchange_id),
+        json.dumps(meeting_record, ensure_ascii=False)
+    )
+
     # Preserve relationships/transformation traces, not only final participant outputs.
     for to_name, output in round2.items():
         for from_name, source_output in round1.items():
