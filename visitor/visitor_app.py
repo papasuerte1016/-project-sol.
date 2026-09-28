@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
-import html, json, os, sqlite3, time, urllib.parse
+import html, json, os, sqlite3, time, urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT=int(os.getenv("PORT","8080"))
 DB=os.getenv("SOL_VISITOR_DB","/data/visitors.db")
 HUB="https://docs.google.com/document/d/1xCV4Ab7Lr8Kz_3VQtZA1ZJuHMG09Ypasvo_gJ_hz7NE/edit?usp=drivesdk"
+MODEL_URL=os.getenv("SOL_MODEL_URL","http://sol-model.railway.internal:11434").rstrip("/")
+MODEL_NAME=os.getenv("SOL_MODEL_NAME","qwen2.5:0.5b")
+
+def ask_sol(prompt):
+    payload=json.dumps({"model":MODEL_NAME,"prompt":prompt,"stream":False}).encode()
+    req=urllib.request.Request(MODEL_URL+"/api/generate",data=payload,headers={"Content-Type":"application/json"},method="POST")
+    with urllib.request.urlopen(req,timeout=90) as r:
+        data=json.loads(r.read().decode())
+    return (data.get("response") or "").strip()
+
 os.makedirs(os.path.dirname(DB) or ".", exist_ok=True)
 
 def db():
@@ -68,8 +78,15 @@ class H(BaseHTTPRequestHandler):
         name=(d.get("name",["Anonymous"])[0].strip() or "Anonymous")[:80]
         msg=d.get("message",[""])[0].strip()[:5000]
         if not msg: return self.send(400,page("<p>Message is required.</p>"))
-        c=db(); cur=c.execute("INSERT INTO messages(created,name,message) VALUES(?,?,?)",(int(time.time()),name,msg)); mid=cur.lastrowid; c.commit(); c.close()
-        return self.send(200,page(f'<h1>Received 🔔</h1><p>Your Project Sol message is <b>#{mid}</b>.</p><p><a href="/messages">Check for a Sol response</a> · <a href="/">Send another</a></p>'))
+        c=db(); cur=c.execute("INSERT INTO messages(created,name,message,status) VALUES(?,?,?,'thinking')",(int(time.time()),name,msg)); mid=cur.lastrowid; c.commit(); c.close()
+        try:
+            answer=ask_sol(msg)
+            if not answer: raise RuntimeError("model returned an empty response")
+            c=db(); c.execute("UPDATE messages SET response=?, status='answered' WHERE id=?",(answer,mid)); c.commit(); c.close()
+            return self.send(200,page(f'<h1>Sol</h1><div class=card><p><b>You:</b> {html.escape(msg)}</p><p><b>Sol:</b> {html.escape(answer)}</p></div><p><a href="/">Ask Sol another question</a></p>'))
+        except Exception as e:
+            c=db(); c.execute("UPDATE messages SET status='model_error', response=? WHERE id=?",(str(e)[:500],mid)); c.commit(); c.close()
+            return self.send(502,page(f'<h1>Sol could not answer yet</h1><div class=card><p>Your message <b>#{mid}</b> was saved.</p><p>The model connection failed: {html.escape(str(e))}</p></div><p><a href="/">Try another message</a></p>'))
     def log_message(self, fmt,*args): pass
 
 ThreadingHTTPServer(("0.0.0.0",PORT),H).serve_forever()
