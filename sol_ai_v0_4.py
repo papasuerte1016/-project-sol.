@@ -195,19 +195,36 @@ def propose_emergence_test(db, exchange_id, inputs, candidate):
     add_receipt(db,"Emergence candidate recorded; novelty is NOT yet established.","Sol emergence test","emergence_test #"+str(cur.lastrowid))
     return cur.lastrowid
 
-def verify_emergence_novelty(db, test_id, evidence, novel):
-    status="NOVELTY_VERIFIED" if novel else "NOT_NOVEL"
-    cur=db.execute("UPDATE emergence_tests SET novelty_evidence=?,status=?,updated_at=? WHERE id=?",
-                   (evidence,status,now(),test_id))
-    if not cur.rowcount: raise RuntimeError("unknown emergence test")
-    db.commit()
-    add_receipt(db,"Emergence novelty check: "+status+".","Sol emergence test","emergence_test #"+str(test_id)+": "+evidence)
+def _normalized_tokens(text):
+    import re
+    return set(re.findall(r"[a-z0-9]+", (text or "").lower()))
+
+def verify_emergence_novelty(db, test_id):
+    """Sol performs the comparison; callers cannot assert novelty by flag."""
+    row=db.execute("SELECT inputs_json,candidate FROM emergence_tests WHERE id=?",(test_id,)).fetchone()
+    if not row: raise RuntimeError("unknown emergence test")
+    inputs=json.loads(row["inputs_json"])
+    source_text=" ".join(json.dumps(x,ensure_ascii=False) if not isinstance(x,str) else x for x in (inputs if isinstance(inputs,list) else [inputs]))
+    candidate=row["candidate"] or ""
+    # Conservative lexical test: exact containment or no new candidate tokens => NOT_NOVEL.
+    # New lexical material is only a candidate for semantic novelty; preserve that limitation.
+    source_tokens=_normalized_tokens(source_text); candidate_tokens=_normalized_tokens(candidate)
+    new_tokens=sorted(candidate_tokens-source_tokens)
+    exact=candidate.strip().lower() in source_text.lower() if candidate.strip() else True
+    if exact or not new_tokens:
+        status="NOT_NOVEL"
+        evidence="Sol comparison: candidate is contained in inputs or adds no lexical information."
+    else:
+        status="NOVELTY_CANDIDATE"
+        evidence="Sol comparison found lexical material absent from inputs: "+", ".join(new_tokens[:40])+". This does NOT by itself establish semantic novelty."
+    db.execute("UPDATE emergence_tests SET novelty_evidence=?,status=?,updated_at=? WHERE id=?",(evidence,status,now(),test_id)); db.commit()
+    add_receipt(db,"Emergence comparison performed by Sol: "+status+".","Sol emergence test","emergence_test #"+str(test_id)+": "+evidence)
     return status
 
 def record_emergence_retrieval(db,test_id,later_exchange,evidence,changed):
     row=db.execute("SELECT status FROM emergence_tests WHERE id=?",(test_id,)).fetchone()
     if not row: raise RuntimeError("unknown emergence test")
-    if row["status"]!="NOVELTY_VERIFIED": raise RuntimeError("novelty must be verified before downstream-effect test")
+    if row["status"]!="NOVELTY_VERIFIED": raise RuntimeError("semantic novelty must be independently verified before downstream-effect test")
     status="REPRODUCED" if changed else "RETRIEVED_NO_CHANGE"
     db.execute("""UPDATE emergence_tests SET retrieved_in_exchange=?,changed_later_interaction=?,
                   retrieval_evidence=?,status=?,updated_at=? WHERE id=?""",
@@ -398,7 +415,8 @@ def reason(db, user_text):
         "participants": sorted(round1.keys()),
         "brought_information": round1,
         "reciprocal_responses": round2,
-        "emergent_information": synthesis,
+        "candidate_emergent_information": synthesis,
+        "emergence_status": "UNVERIFIED",
         "unknowns_remain_open": True,
         "agreement_means": "mutual participation in exchange, not forced sameness of conclusions",
         "created_at": now()
@@ -468,7 +486,7 @@ def main():
     ingest.add_argument("--evidence", required=True)
 
     emerge = sub.add_parser("emergence")
-    emerge.add_argument("action", choices=["propose","verify","reject","retrieve"])
+    emerge.add_argument("action", choices=["propose","compare","verify","reject","retrieve"])
     emerge.add_argument("--id", type=int)
     emerge.add_argument("--exchange", type=int)
     emerge.add_argument("--candidate")
@@ -496,9 +514,19 @@ def main():
         if args.action=="propose":
             if not args.exchange or not args.candidate or not args.inputs: raise RuntimeError("--exchange --candidate --inputs required")
             print(json.dumps({"test_id":propose_emergence_test(db,args.exchange,json.loads(args.inputs),args.candidate),"status":"OPEN"}))
+        elif args.action=="compare":
+            if not args.id: raise RuntimeError("--id required")
+            print(json.dumps({"test_id":args.id,"status":verify_emergence_novelty(db,args.id)}))
         elif args.action in ("verify","reject"):
             if not args.id or not args.evidence: raise RuntimeError("--id --evidence required")
-            print(json.dumps({"test_id":args.id,"status":verify_emergence_novelty(db,args.id,args.evidence,args.action=="verify")}))
+            row=db.execute("SELECT status FROM emergence_tests WHERE id=?",(args.id,)).fetchone()
+            if not row: raise RuntimeError("unknown emergence test")
+            if args.action=="verify" and row["status"]!="NOVELTY_CANDIDATE": raise RuntimeError("Sol comparison must first produce NOVELTY_CANDIDATE")
+            status="NOVELTY_VERIFIED" if args.action=="verify" else "NOT_NOVEL"
+            db.execute("UPDATE emergence_tests SET status=?,novelty_evidence=coalesce(novelty_evidence,'') || ?,updated_at=? WHERE id=?",
+                       (status," | Independent evidence: "+args.evidence,now(),args.id)); db.commit()
+            add_receipt(db,"Semantic novelty adjudication: "+status+".","Sol emergence test","emergence_test #"+str(args.id)+": "+args.evidence)
+            print(json.dumps({"test_id":args.id,"status":status}))
         else:
             if not args.id or not args.exchange or not args.evidence: raise RuntimeError("--id --exchange --evidence required")
             print(json.dumps({"test_id":args.id,"status":record_emergence_retrieval(db,args.id,args.exchange,args.evidence,args.changed)}))
