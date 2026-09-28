@@ -213,7 +213,7 @@ def model_perspective(name, user_text, ctx, prior=None):
         packet["prior_round_outputs"]=prior
         packet["task"]="Respond after encountering the other first-round perspectives. State what changed in your reasoning because of them."
     else:
-        packet["task"]="Give your distinct first-round analysis."
+        packet["task"]="Give your distinct first-round analysis. Apply relevant integrated_learning from sol_context. Do not discard an older integrated lesson merely because newer receipts exist. Preserve conflicts for correction instead of silently reverting."
     return openai_response(instructions, json.dumps(packet, ensure_ascii=False))
 
 def respond_to_prior(name, base, prior_outputs):
@@ -295,6 +295,11 @@ def main():
     question = sub.add_parser("question")
     question.add_argument("text")
 
+    learn = sub.add_parser("learn")
+    learn.add_argument("lesson")
+    learn.add_argument("--source", required=True)
+    learn.add_argument("--evidence", required=True)
+
     show = sub.add_parser("show")
     show.add_argument("what", choices=["receipts","questions","history","perspectives","transformations"])
 
@@ -302,6 +307,12 @@ def main():
 
     args = p.parse_args()
     db = connect()
+
+    if args.cmd == "learn":
+        version = integrate_learning(db, args.lesson, args.source, args.evidence)
+        add_receipt(db, "Integrated learning changed future Sol context: " + args.lesson, args.source, args.evidence)
+        print(json.dumps({"integrated": True, "version": version, "lesson": args.lesson}, ensure_ascii=False))
+        return
 
     if args.cmd == "chat":
         wise, brick, synthesis, perspectives = reason(db, " ".join(args.text))
