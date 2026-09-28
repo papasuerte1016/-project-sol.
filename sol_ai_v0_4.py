@@ -187,6 +187,20 @@ def integrate_learning(db, lesson, source, evidence):
     return set_state(db, "integrated_learning",
                      json.dumps(lessons, ensure_ascii=False), version)
 
+def derive_cross_input_candidate(inputs):
+    """Derive a relationship claim from independently preserved inputs without rewriting them."""
+    texts=[str(x.get("text","")) if isinstance(x,dict) else str(x) for x in inputs]
+    joined=" ".join(texts).lower()
+    has_proof=("proof" in joined or "establish" in joined or "verify" in joined)
+    has_access=("discover" in joined or "accessible" in joined or "route" in joined)
+    has_recip=("reciproc" in joined or "meeting" in joined or "interaction" in joined)
+    if has_proof and has_access and has_recip:
+        return ("A shared system cannot establish an emergent result merely by generating it: "
+                "the result must become independently discoverable as a preserved relationship, "
+                "then be retrieved and shown to alter a later interaction. "
+                "Therefore discoverability is part of the operational test of emergence, not only a storage property.")
+    return "No cross-input candidate derived under the current deterministic rule."
+
 def propose_emergence_test(db, exchange_id, inputs, candidate):
     cur=db.execute("""INSERT INTO emergence_tests(exchange_id,inputs_json,candidate,status,created_at,updated_at)
                       VALUES(?,?,?,'OPEN',?,?)""",
@@ -486,7 +500,7 @@ def main():
     ingest.add_argument("--evidence", required=True)
 
     emerge = sub.add_parser("emergence")
-    emerge.add_argument("action", choices=["propose","compare","verify","reject","retrieve"])
+    emerge.add_argument("action", choices=["derive","propose","compare","verify","reject","retrieve"])
     emerge.add_argument("--id", type=int)
     emerge.add_argument("--exchange", type=int)
     emerge.add_argument("--candidate")
@@ -511,7 +525,11 @@ def main():
     db = connect()
 
     if args.cmd == "emergence":
-        if args.action=="propose":
+        if args.action=="derive":
+            if not args.inputs: raise RuntimeError("--inputs required")
+            inputs=json.loads(args.inputs)
+            print(json.dumps({"candidate":derive_cross_input_candidate(inputs)},ensure_ascii=False))
+        elif args.action=="propose":
             if not args.exchange or not args.candidate or not args.inputs: raise RuntimeError("--exchange --candidate --inputs required")
             print(json.dumps({"test_id":propose_emergence_test(db,args.exchange,json.loads(args.inputs),args.candidate),"status":"OPEN"}))
         elif args.action=="compare":
