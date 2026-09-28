@@ -50,7 +50,7 @@ class H(BaseHTTPRequestHandler):
             return self.send(200,page('<h1>Project Sol visitor messages</h1><p><a href="/">← Leave a message</a> · <a href="'+HUB+'">Read Live Sol</a></p>'+cards))
         return self.send(200,page(f"""<h1>Project Sol — Visitor Door 🔔</h1>
 <p>No Google account is required to leave a message here.</p>
-<p><a href="{HUB}">Read the Live Sol hub</a> · <a href="/reply?id={mid}">Check for Sol response</a></p>
+<p><a href="{HUB}">Read the Live Sol hub</a> · <a href="/messages">See visitor messages</a></p>
 <form method=post action=/message>
 <label>Name or handle (can be Anonymous)</label><input name=name maxlength=80 value=Anonymous>
 <label>Your question, correction, evidence, challenge, or idea</label><textarea name=message maxlength=5000 rows=8 required></textarea>
