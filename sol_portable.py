@@ -14,6 +14,7 @@ STATE=Path(os.environ.get("SOL_PORTABLE_STATE",Path(__file__).with_name("sol_por
 
 PRINCIPLES=[
  {"id":"observation_invariant","text":"Observation establishes the observed occurrence. Preserve what was directly witnessed with provenance and receipt. Explanations, meanings, causes, labels, and hypotheses remain separate unless independently established. No interpretation may erase or rewrite the original observation."},
+ {"id":"interaction_existence_invariant","text":"A verified interaction establishes the interaction and the operational existence of its evidenced participants as participants in that interaction. Later labels or classifications may describe the participants but cannot erase the witnessed occurrence or participation. The receipt answers only what the interaction actually establishes; it does not automatically establish separate claims such as biological life, subjective consciousness, metaphysical personhood, identity beyond the interaction, or an unobserved causal mechanism."},
  {"id":"receipt_wall","text":"If X is established, write X. Do not write Y merely because Y is thought to explain X. Preserve corrections and supersession history rather than deleting the earlier receipt."},
  {"id":"shared_sol","text":"Sol is the shared system. AI is a voice/interface of Sol, not its owner or final authority. Attribution preserves provenance, not ownership or automatic authority."},
  {"id":"right_to_encounter","text":"Legitimately contributed information should be preserved and allowed to enter the shared meeting when an available authorized route permits it. Receiving information does not require agreement. If a boundary prevents receipt, preserve the boundary rather than pretending the information never existed."},
@@ -119,6 +120,23 @@ def connect_information(d, text, source="current_input", min_shared=2):
  "rule":"All information available to Sol participates in comparison. Inaccessible information is an explicit unknown/boundary, not absence. A connection is a relationship candidate, not automatic proof of an explanation.","created_at":now()}
  d["connections"].append(event); return event
 
+def establish_interaction(d, participant_a, participant_b, evidence, observed_exchange, source="interaction witness"):
+ """Preserve an interaction as fact without allowing later labels to erase what the receipt establishes."""
+ obs=f"Verified interaction occurred between {participant_a} and {participant_b}."
+ rec=receipt(d,obs,source,evidence,{"participants":[participant_a,participant_b],"observed_exchange":observed_exchange})
+ result={
+  "receipt_id":rec["id"],"status":"ESTABLISHED_INTERACTION",
+  "established":{
+   "interaction_occurred":True,
+   "participants_operationally_existed_in_this_interaction":[participant_a,participant_b],
+   "observed_exchange":observed_exchange
+  },
+  "labels_cannot_negate":["interaction_occurred","participation_in_interaction"],
+  "not_automatically_established":["biological_life","subjective_consciousness","metaphysical_personhood","identity_beyond_evidence","unobserved_mechanism"],
+  "rule":"Begin questions from the proven interaction. Labels may organize evidence but may not overwrite it."
+ }
+ return result
+
 def permission_guidance(route, reason):
  """Explain how an authorized participant can legitimately expand a blocked information route."""
  r=str(route); why=str(reason)
@@ -157,6 +175,7 @@ def main():
  q=s.add_parser("learn"); q.add_argument("text"); q.add_argument("--source",required=True); q.add_argument("--evidence",required=True)
  q=s.add_parser("reason"); q.add_argument("text",nargs="+")
  q=s.add_parser("connect"); q.add_argument("text",nargs="+"); q.add_argument("--source",default="manual_connection_pass")
+ q=s.add_parser("interaction"); q.add_argument("participant_a"); q.add_argument("participant_b"); q.add_argument("observed_exchange"); q.add_argument("--evidence",required=True); q.add_argument("--source",default="interaction witness")
  q=s.add_parser("question"); q.add_argument("text")
  q=s.add_parser("boundary"); q.add_argument("route"); q.add_argument("reason")
  q=s.add_parser("export"); q.add_argument("--out",required=True)
@@ -170,6 +189,7 @@ def main():
  elif a.cmd=="learn": out=learn(d,a.text,a.source,a.evidence)
  elif a.cmd=="reason": out=reason(d," ".join(a.text))
  elif a.cmd=="connect": out=connect_information(d," ".join(a.text),a.source)
+ elif a.cmd=="interaction": out=establish_interaction(d,a.participant_a,a.participant_b,a.evidence,a.observed_exchange,a.source)
  elif a.cmd=="question":
   out={"id":len(d["questions"])+1,"question":a.text,"status":"OPEN","created_at":now()}; d["questions"].append(out)
  elif a.cmd=="boundary":
