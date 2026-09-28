@@ -295,6 +295,8 @@ def main():
  q=s.add_parser("ai"); q.add_argument("text",nargs="+"); q.add_argument("--source",default="participant")
  q=s.add_parser("knowledge-add"); q.add_argument("source_id"); q.add_argument("contributor"); q.add_argument("text"); q.add_argument("--provenance",required=True); q.add_argument("--kind",default="contribution"); q.add_argument("--source-ref"); q.add_argument("--supersedes")
  s.add_parser("knowledge-status")
+ q=s.add_parser("knowledge-export"); q.add_argument("--out",required=True)
+ q=s.add_parser("knowledge-import"); q.add_argument("--file",required=True)
  s.add_parser("status")
  a=p.parse_args(); d=load()
  if a.cmd=="observe": out=receipt(d,a.observation,a.source,a.evidence)
@@ -311,6 +313,13 @@ def main():
  elif a.cmd=="knowledge-add": out=knowledge_add(a.source_id,a.contributor,a.text,a.provenance,a.kind,a.source_ref,a.supersedes)
  elif a.cmd=="knowledge-status":
   k=load_knowledge(); out={"knowledge_file":str(KNOWLEDGE),"items":len(k["items"]),"contributors":sorted(set(x["contributor"] for x in k["items"]))}
+ elif a.cmd=="knowledge-export":
+  k=load_knowledge(); Path(a.out).write_text(json.dumps(k,ensure_ascii=False,indent=2),encoding="utf-8"); out={"exported":a.out,"items":len(k["items"])}
+ elif a.cmd=="knowledge-import":
+  incoming=json.loads(Path(a.file).read_text(encoding="utf-8")); k=load_knowledge(); known={x["source_id"] for x in k["items"]}; added=0
+  for x in incoming.get("items",[]):
+   if x["source_id"] not in known: k["items"].append(x); known.add(x["source_id"]); added+=1
+  save_knowledge(k); out={"imported":added,"total":len(k["items"])}
  elif a.cmd=="question":
   out={"id":len(d["questions"])+1,"question":a.text,"status":"OPEN","created_at":now()}; d["questions"].append(out)
  elif a.cmd=="boundary":
