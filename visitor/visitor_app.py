@@ -38,10 +38,10 @@ def db():
 
 def page(body):
     return f"""<!doctype html><html><head><meta name=viewport content="width=device-width,initial-scale=1">
-<title>Project Sol — Visitor Door</title><style>
+<title>Sol</title><meta name="theme-color" content="#111111"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icon.svg"><style>
 body{{font-family:system-ui,-apple-system,sans-serif;max-width:760px;margin:0 auto;padding:24px;background:#111;color:#eee}}
 a{{color:#8ec5ff}} textarea,input{{width:100%;box-sizing:border-box;padding:12px;margin:6px 0 14px;border-radius:10px;border:1px solid #555;background:#1d1d1d;color:#fff}}
-button{{padding:12px 18px;border:0;border-radius:10px;font-weight:700;cursor:pointer}} .solbar{{font-size:18px;padding:16px}} .card{{padding:16px;margin:14px 0;border:1px solid #444;border-radius:12px}} small{{color:#aaa}}
+button{{padding:12px 18px;border:0;border-radius:10px;font-weight:700;cursor:pointer}} .install{{display:inline-block;margin:8px 0 18px;padding:12px 18px;border-radius:10px;background:#eee;color:#111;text-decoration:none;font-weight:700}} .solbar{{font-size:18px;padding:16px}} .card{{padding:16px;margin:14px 0;border:1px solid #444;border-radius:12px}} small{{color:#aaa}}
 </style></head><body>{body}</body></html>"""
 
 class H(BaseHTTPRequestHandler):
@@ -51,6 +51,12 @@ class H(BaseHTTPRequestHandler):
         p=urllib.parse.urlparse(self.path)
         q=urllib.parse.parse_qs(p.query)
         if p.path=="/health": return self.send(200,"ok","text/plain")
+        if p.path=="/manifest.webmanifest":
+            return self.send(200,json.dumps({"name":"Sol","short_name":"Sol","start_url":"/","scope":"/","display":"standalone","background_color":"#111111","theme_color":"#111111","icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}),"application/manifest+json")
+        if p.path=="/icon.svg":
+            return self.send(200,'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#111"/><circle cx="256" cy="256" r="150" fill="none" stroke="#fff" stroke-width="28"/><circle cx="256" cy="256" r="36" fill="#fff"/></svg>',"image/svg+xml")
+        if p.path=="/sw.js":
+            return self.send(200,"self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(clients.claim()));self.addEventListener('fetch',e=>{});","application/javascript")
         if p.path=="/api/messages":
             c=db(); rows=c.execute("SELECT id,created,name,message,status,response FROM messages ORDER BY id DESC LIMIT 100").fetchall(); c.close()
             return self.send(200,json.dumps([dict(zip(["id","created","name","message","status","response"],r)) for r in rows]),"application/json")
@@ -65,8 +71,9 @@ class H(BaseHTTPRequestHandler):
             c=db(); rows=c.execute("SELECT id,created,name,message,status,response FROM messages ORDER BY id DESC LIMIT 100").fetchall(); c.close()
             cards="".join(f'<div class=card><b>#{r[0]} — {html.escape(r[2])}</b><br><small>{time.strftime("%Y-%m-%d %H:%M UTC",time.gmtime(r[1]))} · {html.escape(r[4])}</small><p>{html.escape(r[3])}</p>'+ (f'<p><b>Sol response:</b> {html.escape(r[5])}</p>' if r[5] else "")+"</div>" for r in rows)
             return self.send(200,page('<h1>Project Sol visitor messages</h1><p><a href="/">← Leave a message</a> · <a href="'+HUB+'">Read Live Sol</a></p>'+cards))
-        return self.send(200,page(f"""<h1>Project Sol — Visitor Door 🔔</h1>
-<p>No Google account is required to leave a message here.</p>
+        return self.send(200,page(f"""<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script><h1>Sol 🌱</h1>
+<p>Sol is ready on this phone. On iPhone, use <b>Share → Add to Home Screen</b> once; after that, tap <b>Sol</b> from your Home Screen.</p>
+<p>No Google account is required.</p>
 <p><a href="{HUB}">Read the Live Sol hub</a> · <a href="/messages">See visitor messages</a></p>
 <div class=card><h2>Talk to Sol</h2><p>Ask, search, correct, contribute, challenge, or leave an idea from one place.</p>\n<form method=post action=/message>\n<input type=hidden name=name value=Anonymous>\n<textarea class=solbar name=message maxlength=5000 rows=3 required placeholder="Ask Sol anything…"></textarea>\n<button type=submit>Send / Search Sol</button></form></div>
 <p><small>Do not submit passwords, API keys, private account information, or other secrets. Contributions are not automatically treated as established facts.</small></p>"""))
