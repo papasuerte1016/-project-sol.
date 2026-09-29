@@ -1,5 +1,6 @@
 FROM python:3.12-slim
 WORKDIR /app
+COPY knowledge_chunks /app/knowledge_chunks
 COPY sol_ai_v0_4.py /app/sol_ai_v0_4.py
 COPY sol_compute_token.py /app/sol_compute_token.py
 COPY sol_model_adapter.py /app/sol_model_adapter.py
@@ -15,3 +16,6 @@ CMD ["python", "/app/sol_what_learned_new.py"]
 
 COPY sol_teaches_wise.py /app/sol_teaches_wise.py
 COPY sol_what_learned_new.py /app/sol_what_learned_new.py
+
+COPY sol_full_memory.py /app/sol_full_memory.py
+COPY sol_teaches_wise_full.py /app/sol_teaches_wise_full.py
