@@ -2,7 +2,7 @@ import base64,gzip,json,re
 from pathlib import Path
 ROOT=Path(__file__).parent
 def load():
-    s="".join((ROOT/"knowledge_chunks"/f"chunk{i:02}.b64").read_text().strip() for i in range(6))
+    s="".join((ROOT/"knowledge_chunks"/f"chunk{i:02}.b64").read_text().strip() for i in range(6)) + (ROOT/"knowledge_chunks"/"chunk06a.b64").read_text().strip() + (ROOT/"knowledge_chunks"/"chunk06b.b64").read_text().strip()
     raw=gzip.decompress(base64.b64decode(s))
     return json.loads(raw)
 def retrieve(query,k=24):
