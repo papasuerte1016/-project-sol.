@@ -11,6 +11,6 @@ COPY sol_native_ai.py /app/sol_native_ai.py
 COPY sol_critique_wise_network.py /app/sol_critique_wise_network.py
 COPY sol_predeploy_checks.py /app/sol_predeploy_checks.py
 ENV PYTHONUNBUFFERED=1
-CMD ["python", "/app/sol_runtime.py"]
+CMD ["python", "/app/sol_teaches_wise.py"]
 
 COPY sol_teaches_wise.py /app/sol_teaches_wise.py
