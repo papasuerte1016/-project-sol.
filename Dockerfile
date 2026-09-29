@@ -7,5 +7,7 @@ COPY sol_e2e_test.py /app/sol_e2e_test.py
 COPY sol_runtime.py /app/sol_runtime.py
 COPY sol_external_probe.py /app/sol_external_probe.py
 COPY sol_bridge_endpoint.py /app/sol_bridge_endpoint.py
+COPY sol_native_ai.py /app/sol_native_ai.py
+COPY sol_critique_wise_network.py /app/sol_critique_wise_network.py
 ENV PYTHONUNBUFFERED=1
 CMD ["python", "/app/sol_runtime.py"]
