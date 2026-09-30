@@ -222,6 +222,68 @@ def execute_task(message,history=None):
                  "so I did not pretend the action ran. The receipt records the missing capability.")
     }
 
+
+def self_status_request(message):
+    x=message.lower()
+    phrases=(
+        "why aren't you doing anything","why arent you doing anything",
+        "why are you not doing anything","why can't you do anything","why cant you do anything",
+        "what can you actually do","what are you able to do","what is stopping you",
+        "what's stopping you","whats stopping you","what is missing","what are you missing"
+    )
+    return any(p in x for p in phrases)
+
+def broad_task_intent(message):
+    x=message.strip().lower()
+    # Treat requests to change/create/fetch/operate something as tasks even when phrased conversationally.
+    action_terms=(
+        "do ","make ","create ","build ","fix ","change ","edit ","update ","deploy ","run ",
+        "research ","find ","look up ","search ","check ","test ","analyze ","compare ","summarize ",
+        "write ","generate ","download ","upload ","publish ","schedule ","monitor ","send ","open ",
+        "connect ","wire ","install ","remove ","add ","turn on ","set up ","setup ","try "
+    )
+    if any(x.startswith(t) for t in action_terms):
+        return True
+    embedded=(
+        "can you make","can you create","can you build","can you fix","can you change","can you edit",
+        "can you research","can you find","can you look up","can you run","can you deploy",
+        "i need you to","i want you to","please make","please create","please fix","please do",
+        "for me","go do","take care of","handle this","carry this out"
+    )
+    return any(p in x for p in embedded)
+
+def capability_status_reply():
+    available=[]
+    missing=[]
+    for name,meta in SOL_SERVICES.items():
+        if meta.get("available"):
+            available.append(name)
+        else:
+            missing.append(name)
+    return (
+        "Here is my actual execution state right now.\n\n"
+        "Connected now: "+", ".join(available)+".\n"
+        "Not connected yet: "+", ".join(missing)+".\n\n"
+        "That is why some requests can be executed and others can only be planned. "
+        "I will not call a planned task completed unless an attached executor returns evidence."
+    )
+
+def dispatch_message(message,history):
+    if self_status_request(message):
+        return {
+            "ok":True,
+            "mode":"self_status",
+            "reply":capability_status_reply(),
+            "services":SOL_SERVICES
+        }
+    if broad_task_intent(message):
+        result=execute_task(message,history)
+        result["mode"]="task"
+        return result
+    result=service_chat(message,history)
+    result["mode"]="conversation"
+    return result
+
 def service_chat(message,history):
     route=classify_service(message)
     if route=="media":
@@ -268,51 +330,71 @@ def service_chat(message,history):
         }
 
 PHONE_CHAT_OVERRIDE = r"""
+<style>
+/* Sol Phone v2: one assistant surface, no prototype control panel */
+body main{max-width:760px}
+.sub{display:none!important}
+#status{font-size:13px;opacity:.72;padding:10px 14px}
+#q{min-height:120px}
+#learn,#needs,#export,#clear{display:none!important}
+.card:has(#export),.card:has(#clear){display:none!important}
+#send{width:100%;margin-right:0}
+#out{min-height:150px}
+.sol-mode{font-size:12px;opacity:.6;margin-top:8px}
+</style>
 <script>
 (function(){
-  function localCommand(s){
-    s=s.toLowerCase();
-    return (s.includes("learn")&&s.includes("everything")) ||
-           s.includes("what do you need") ||
-           s.includes("what does it need") ||
-           (s.includes("execute")&&s.includes("need")) ||
-           (s.includes("wise")&&(s.includes("read")||s.includes("investigate")||s.includes("know"))) ||
-           s.includes("flipper") ||
-           s.includes("jailbreak") ||
-           s.includes("modding") ||
-           s==="status";
-  }
   let chatHistory=[];
   try{ chatHistory=JSON.parse(localStorage.getItem("sol_chat_history")||"[]"); }catch(e){}
+
   const send=document.getElementById("send");
-  if(!send)return;
-  send.onclick=async()=>{
-    const q=document.getElementById("q").value.trim();
+  const qbox=document.getElementById("q");
+  const out=document.getElementById("out");
+  if(!send||!qbox||!out)return;
+
+  send.textContent="Send";
+  qbox.placeholder="Ask Sol anything or give it a task…";
+  try{
+    document.querySelectorAll(".badge").forEach(el=>{
+      if(el.textContent.trim()==="No server required") el.textContent="Sol services connected";
+      if(el.textContent.trim()==="Local") el.textContent="Phone + Sol backend";
+    });
+  }catch(e){}
+
+  async function submit(){
+    const q=qbox.value.trim();
     if(!q)return;
-    const out=document.getElementById("out");
-    if(localCommand(q)){
-      out.textContent=answer(q);
-      return;
-    }
-    const isTask=/^(research|find|look up|search|build|create|make|edit|change|fix|deploy|run|test|check|summarize|analyze|compare|generate|write|download|upload|publish|schedule|monitor)\b/i.test(q) || /\b(for me|do this|handle this|carry this out|take care of this)\b/i.test(q);
-    out.textContent=isTask?"Sol is working on the task…":"Sol is thinking…";
+    send.disabled=true;
+    out.textContent="Sol is working…";
     try{
-      const r=await fetch(isTask?"/api/task":"/api/chat",{
+      const r=await fetch("/api/dispatch",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({message:q,history:chatHistory})
       });
       const data=await r.json();
-      if(!r.ok)throw new Error(data.error||"chat failed");
-      out.textContent=data.reply;
-      chatHistory.push({role:"user",content:q},{role:"assistant",content:data.reply});
-      chatHistory=chatHistory.slice(-16);
+      if(!r.ok)throw new Error(data.error||"request failed");
+      let text=data.reply||"";
+      if(data.mode==="task" && data.status){
+        text += "\n\n[task status: "+data.status+"]";
+      }
+      out.textContent=text;
+      chatHistory.push({role:"user",content:q},{role:"assistant",content:text});
+      chatHistory=chatHistory.slice(-20);
       try{localStorage.setItem("sol_chat_history",JSON.stringify(chatHistory));}catch(e){}
-      receipt("conversation",q+" -> "+data.reply);
+      try{receipt("conversation",q+" -> "+text);}catch(e){}
+      qbox.value="";
     }catch(e){
-      out.textContent="Conversation backend unavailable right now. Local Sol functions are still available.\n"+e;
+      out.textContent="Sol could not complete that request. "+e;
+    }finally{
+      send.disabled=false;
     }
-  };
+  }
+
+  send.onclick=submit;
+  qbox.addEventListener("keydown",e=>{
+    if(e.key==="Enter" && !e.shiftKey){e.preventDefault();submit();}
+  });
 })();
 </script>
 """
@@ -356,6 +438,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path=urlparse(self.path).path
+        if path == "/api/dispatch":
+            try:
+                n=int(self.headers.get("Content-Length","0"))
+                if n>20000:
+                    return self.send_json(413,{"ok":False,"error":"too_large"})
+                data=json.loads(self.rfile.read(n) or b"{}")
+                message=str(data.get("message","")).strip()[:5000]
+                history=data.get("history",[])
+                if not message:
+                    return self.send_json(400,{"ok":False,"error":"message_required"})
+                return self.send_json(200,dispatch_message(message,history))
+            except Exception as e:
+                return self.send_json(503,{"ok":False,"error":type(e).__name__,"detail":str(e)[:500]})
         if path == "/api/task":
             try:
                 n=int(self.headers.get("Content-Length","0"))
