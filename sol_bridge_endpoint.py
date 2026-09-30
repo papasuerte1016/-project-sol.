@@ -1,5 +1,5 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import json, os, hashlib, base64, gzip, urllib.request, threading
+import json, os, hashlib, base64, gzip, urllib.request, threading, re, html as htmlmod
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -19,7 +19,7 @@ SOL_SERVICES={
     "media":{"url":MEDIA_URL or None,"kind":"sol_owned","role":"image/video/media generation","available":bool(MEDIA_URL)},
     "task_planner":{"url":"local","kind":"sol_owned","role":"plan multi-step tasks and route capabilities","available":True},
     "task_executor":{"url":"local","kind":"sol_owned","role":"execute connected capabilities, inspect results, preserve task receipt","available":True},
-    "web_search":{"url":None,"kind":"adapter","role":"fresh web search/browser research","available":False},
+    "web_search":{"url":"local_http_research","kind":"sol_owned","role":"fresh web search/browser research","available":True},
     "file_tools":{"url":None,"kind":"adapter","role":"read/write user files and create artifacts","available":False},
     "code_sandbox":{"url":None,"kind":"adapter","role":"run generated code safely","available":False},
     "external_apps":{"url":None,"kind":"adapter","role":"GitHub/Railway/other authenticated app actions","available":False},
@@ -131,6 +131,52 @@ def classify_service(message):
         return "media"
     return "conversation"
 
+
+def _http_text(url,timeout=8,max_bytes=250000):
+    req=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0 SolResearch/1.0"})
+    with urllib.request.urlopen(req,timeout=timeout) as r:
+        raw=r.read(max_bytes)
+        ctype=r.headers.get("Content-Type","")
+    return raw.decode("utf-8","ignore"),ctype
+
+def _strip_html(x):
+    x=re.sub(r"(?is)<script.*?>.*?</script>"," ",x)
+    x=re.sub(r"(?is)<style.*?>.*?</style>"," ",x)
+    x=re.sub(r"(?s)<[^>]+>"," ",x)
+    x=htmlmod.unescape(x)
+    return re.sub(r"\s+"," ",x).strip()
+
+def web_research(message):
+    # Search DuckDuckGo HTML, then summarize result titles/snippets/links.
+    q=urllib.parse.quote_plus(message)
+    url="https://html.duckduckgo.com/html/?q="+q
+    page,ctype=_http_text(url,timeout=10,max_bytes=350000)
+    items=[]
+    # DDG HTML result blocks: capture href + title; also nearby snippet when available.
+    for m in re.finditer(r'(?is)<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',page):
+        href=htmlmod.unescape(m.group(1))
+        title=_strip_html(m.group(2))
+        tail=page[m.end():m.end()+2500]
+        sm=re.search(r'(?is)<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>|<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</div>',tail)
+        snippet=_strip_html((sm.group(1) or sm.group(2)) if sm else "")
+        if title:
+            items.append({"title":title[:220],"snippet":snippet[:500],"url":href[:1200]})
+        if len(items)>=6: break
+    if not items:
+        # Fallback: return cleaned search page excerpt as evidence rather than pretend no attempt happened.
+        excerpt=_strip_html(page)[:3500]
+        return {"ok":bool(excerpt),"query":message,"source":"duckduckgo_html","results":[],"excerpt":excerpt}
+    return {"ok":True,"query":message,"source":"duckduckgo_html","results":items}
+
+def summarize_web_result(message,data):
+    if data.get("results"):
+        lines=["WEB RESEARCH RECEIPT"]
+        for i,x in enumerate(data["results"][:6],1):
+            lines.append(f"{i}. {x['title']}\n{x.get('snippet','')}\n{x.get('url','')}")
+        lines.append("\nThese are retrieved search results, not automatic proof that every result is correct.")
+        return "\n".join(lines)
+    return "WEB RESEARCH RECEIPT\n"+data.get("excerpt","No readable results returned.")
+
 def task_like(message):
     s=message.strip().lower()
     starters=("research ","find ","look up ","search ","build ","create ","make ","edit ","change ","fix ","deploy ","run ","test ","check ","summarize ","analyze ","compare ","generate ","write ","download ","upload ","publish ","schedule ","monitor ")
@@ -140,7 +186,7 @@ def classify_task(message):
     s=message.lower()
     if any(x in s for x in ("generate an image","create an image","make an image","generate a video","create a video","make a video","animate","runway")):
         return "media"
-    if any(x in s for x in ("research","search the web","look up","latest","find online","browse")):
+    if any(x in s for x in ("research","search the web","look up","latest","find online","browse","http://","https://")):
         return "web_search"
     if any(x in s for x in ("file","pdf","docx","spreadsheet","excel","csv","document","presentation","pptx","edit this")):
         return "file_tools"
@@ -205,6 +251,21 @@ def execute_task(message,history=None):
         rec=task_receipt(task_id,plan,"failed",error="native_reasoning_unavailable")
         return {"ok":True,"task":True,"task_id":task_id,"status":"failed","plan":plan,"receipt":rec,
                 "reply":"I received the task, but my native reasoning service did not return execution evidence."}
+
+    if cap=="web_search":
+        try:
+            data=web_research(message)
+            status="completed" if data.get("ok") else "failed"
+            result={"service":"web_search","execution_performed":True,"evidence":data}
+            rec=task_receipt(task_id,plan,status,result=result)
+            return {"ok":True,"task":True,"task_id":task_id,"status":status,"plan":plan,
+                    "result":result,"receipt":rec,"reply":summarize_web_result(message,data)}
+        except Exception as e:
+            result={"service":"web_search","execution_performed":True,"error":type(e).__name__,"detail":str(e)[:400]}
+            rec=task_receipt(task_id,plan,"failed",result=result,error=str(e)[:400])
+            return {"ok":True,"task":True,"task_id":task_id,"status":"failed","plan":plan,
+                    "result":result,"receipt":rec,
+                    "reply":"I attempted live web research, but the HTTP research executor failed: "+type(e).__name__+"."}
 
     missing=SOL_SERVICES.get(cap,{})
     result={
@@ -354,6 +415,7 @@ body main{max-width:760px}
 
   send.textContent="Send";
   qbox.placeholder="Ask Sol anything or give it a task…";
+  out.textContent="Ready.";
   try{
     document.querySelectorAll(".badge").forEach(el=>{
       if(el.textContent.trim()==="No server required") el.textContent="Sol services connected";
