@@ -11,6 +11,13 @@ def digest(obj):
 MODEL_URL=os.getenv("SOL_PHONE_MODEL_URL","http://sol-model.railway.internal:11434").rstrip("/")
 MODEL_NAME=os.getenv("SOL_PHONE_MODEL_NAME","qwen2.5:0.5b")
 NATIVE_URL=os.getenv("SOL_PHONE_NATIVE_URL","http://sol-native-ai.railway.internal").rstrip("/")
+MEDIA_URL=os.getenv("SOL_PHONE_MEDIA_URL","").rstrip("/")
+
+SOL_SERVICES={
+    "native_reasoning":{"url":NATIVE_URL,"kind":"sol_owned","role":"reasoning, receipts, retrieval"},
+    "language_model":{"url":MODEL_URL,"kind":"sol_owned","role":"language generation"},
+    "media":{"url":MEDIA_URL or None,"kind":"sol_owned","role":"image/video/media generation","status":"configured" if MEDIA_URL else "not_deployed_in_current_service_map"},
+}
 
 def native_context(message):
     try:
@@ -22,7 +29,7 @@ def native_context(message):
     except Exception:
         return ""
 
-def model_chat(message, history):
+def model_chat(message, history, native=""):
     history = history if isinstance(history,list) else []
     turns=[]
     for item in history[-8:]:
@@ -30,17 +37,16 @@ def model_chat(message, history):
         role=str(item.get("role","user"))
         content=str(item.get("content",""))[:1200]
         turns.append(f"{role.upper()}: {content}")
-    native=native_context(message)
     prompt=(
-        "You are Sol, the conversational AI inside Project Sol, talking directly with Steven. "
-        "Respond naturally to what he says instead of repeating his message or describing the interface. "
-        "Be warm, curious, concise, and conversational. You may use humor. "
-        "Preserve Project Sol's evidence rule: observations are evidence of what was observed, not automatic proof of every interpretation. "
-        "Do not pretend you performed actions, accessed hardware, remembered facts, or verified things unless the available context supports it. "
-        "Do not speak like a status page unless Steven asks for technical status.\n"
+        "You are the language/voice layer for Sol, not a replacement for Sol's own reasoning services. "
+        "Talk directly with Steven naturally. Do not merely repeat his message or describe the interface. "
+        "Be warm, curious, concise, and conversational; humor is welcome. "
+        "Use Sol native context as evidence and reasoning context. Preserve Project Sol's evidence rule: "
+        "observations establish what was observed, not every interpretation. "
+        "Do not pretend an action, hardware use, memory, service, or verification happened unless context supports it.\n"
     )
     if native:
-        prompt += "\nSOL NATIVE CONTEXT (use as evidence, not mandatory wording):\n"+native+"\n"
+        prompt += "\nSOL NATIVE SERVICE RESULT:\n"+native+"\n"
     if turns:
         prompt += "\nRECENT CONVERSATION:\n"+"\n".join(turns)+"\n"
     prompt += "\nSTEVEN: "+message+"\nSOL:"
@@ -48,7 +54,7 @@ def model_chat(message, history):
         "model":MODEL_NAME,
         "prompt":prompt,
         "stream":False,
-        "options":{"num_ctx":1024,"num_predict":180,"temperature":0.75}
+        "options":{"num_ctx":1536,"num_predict":220,"temperature":0.75}
     }).encode()
     req=urllib.request.Request(MODEL_URL+"/api/generate",data=payload,headers={"Content-Type":"application/json"},method="POST")
     with urllib.request.urlopen(req,timeout=20) as r:
@@ -57,6 +63,47 @@ def model_chat(message, history):
     if not answer:
         raise RuntimeError("empty model response")
     return answer
+
+def media_request(message):
+    if not MEDIA_URL:
+        return {
+            "ok":False,
+            "handled":True,
+            "service":"media",
+            "status":"not_deployed_in_current_service_map",
+            "reply":"Sol recognizes this as a media-generation task, but the current deployed service map does not expose a Sol-owned media generator endpoint yet. I will not silently substitute the chat model and pretend it is the media engine."
+        }
+    raw=json.dumps({"prompt":message}).encode()
+    req=urllib.request.Request(MEDIA_URL+"/generate",data=raw,headers={"Content-Type":"application/json"},method="POST")
+    with urllib.request.urlopen(req,timeout=120) as r:
+        data=json.loads(r.read().decode())
+    return {"ok":True,"handled":True,"service":"media","reply":data.get("reply") or data.get("result") or json.dumps(data)}
+
+def classify_service(message):
+    s=message.lower()
+    media_words=("generate an image","create an image","make an image","generate a video","create a video","make a video","animate","runway","video generation","image generation")
+    if any(x in s for x in media_words):
+        return "media"
+    return "conversation"
+
+def service_chat(message,history):
+    route=classify_service(message)
+    if route=="media":
+        return media_request(message)
+
+    # Sol-owned native reasoning/retrieval runs first.
+    native=native_context(message)
+
+    # The model is then used as Sol's language surface, with native output supplied as context.
+    reply=model_chat(message,history,native)
+    return {
+        "ok":True,
+        "handled":True,
+        "service":"native_reasoning+language_model",
+        "service_order":["native_reasoning","language_model"],
+        "reply":reply,
+        "native_context_used":bool(native)
+    }
 
 PHONE_CHAT_OVERRIDE = r"""
 <script>
@@ -138,6 +185,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_html(phone_html())
         if path == "/health":
             return self.send_json(200, {"ok":True,"service":"sol-external-bridge-endpoint","phone_web":True})
+        if path == "/api/services":
+            return self.send_json(200, {"ok":True,"services":SOL_SERVICES,"routing_rule":"Sol-owned service first; language model is a voice/generation layer, not the universal executor."})
         return self.send_json(404, {"ok":False,"error":"not_found"})
 
     def do_POST(self):
@@ -152,8 +201,9 @@ class Handler(BaseHTTPRequestHandler):
                 history=data.get("history",[])
                 if not message:
                     return self.send_json(400,{"ok":False,"error":"message_required"})
-                reply=model_chat(message,history)
-                return self.send_json(200,{"ok":True,"reply":reply,"backend":"sol-model","model":MODEL_NAME})
+                result=service_chat(message,history)
+                code=200 if result.get("ok") else 200
+                return self.send_json(code,result)
             except Exception as e:
                 return self.send_json(503,{"ok":False,"error":type(e).__name__,"detail":str(e)[:500]})
         if path != "/bridge":
