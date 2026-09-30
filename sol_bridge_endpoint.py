@@ -415,6 +415,85 @@ body main{max-width:760px}
 
   send.textContent="Send";
   qbox.placeholder="Ask Sol anything or give it a task…";
+
+  // Voice controls
+  const controls=send.parentElement;
+  const mic=document.createElement("button");
+  mic.type="button";
+  mic.textContent="🎙️ Talk";
+  mic.style.width="100%";
+  mic.style.marginTop="10px";
+  mic.className="secondary";
+
+  const speak=document.createElement("button");
+  speak.type="button";
+  speak.textContent="🔊 Voice replies: ON";
+  speak.style.width="100%";
+  speak.style.marginTop="10px";
+  speak.className="secondary";
+
+  controls.appendChild(mic);
+  controls.appendChild(speak);
+
+  let voiceReplies=true;
+  let recognition=null;
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+
+  function say(text){
+    if(!voiceReplies || !("speechSynthesis" in window) || !text)return;
+    try{
+      speechSynthesis.cancel();
+      const u=new SpeechSynthesisUtterance(text);
+      u.rate=1.0;
+      u.pitch=1.0;
+      speechSynthesis.speak(u);
+    }catch(e){}
+  }
+
+  speak.onclick=()=>{
+    voiceReplies=!voiceReplies;
+    speak.textContent=voiceReplies?"🔊 Voice replies: ON":"🔇 Voice replies: OFF";
+    if(!voiceReplies && "speechSynthesis" in window) speechSynthesis.cancel();
+  };
+
+  if(SR){
+    recognition=new SR();
+    recognition.lang="en-US";
+    recognition.interimResults=false;
+    recognition.continuous=false;
+
+    recognition.onstart=()=>{
+      mic.textContent="🎙️ Listening…";
+      mic.disabled=true;
+    };
+    recognition.onend=()=>{
+      mic.textContent="🎙️ Talk";
+      mic.disabled=false;
+    };
+    recognition.onerror=(e)=>{
+      mic.textContent="🎙️ Talk";
+      mic.disabled=false;
+      out.textContent="Voice input error: "+(e.error||"unknown");
+    };
+    recognition.onresult=(e)=>{
+      const text=e.results?.[0]?.[0]?.transcript||"";
+      if(text){
+        qbox.value=text;
+        submit();
+      }
+    };
+    mic.onclick=()=>{
+      try{
+        recognition.start();
+      }catch(e){
+        out.textContent="Voice input could not start: "+e;
+      }
+    };
+  } else {
+    mic.onclick=()=>{
+      out.textContent="Speech recognition is not exposed by this browser. Text input still works, and spoken replies can still work if speech synthesis is available.";
+    };
+  }
   out.textContent="Ready.";
   try{
     document.querySelectorAll(".badge").forEach(el=>{
@@ -441,6 +520,7 @@ body main{max-width:760px}
         text += "\n\n[task status: "+data.status+"]";
       }
       out.textContent=text;
+      say(text);
       chatHistory.push({role:"user",content:q},{role:"assistant",content:text});
       chatHistory=chatHistory.slice(-20);
       try{localStorage.setItem("sol_chat_history",JSON.stringify(chatHistory));}catch(e){}
@@ -491,7 +571,14 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/sol", "/sol/", "/Sol_Phone.html"):
             return self.send_html(phone_html())
         if path == "/health":
-            return self.send_json(200, {"ok":True,"service":"sol-external-bridge-endpoint","phone_web":True})
+            return self.send_json(200, {
+                "ok":True,
+                "service":"sol-external-bridge-endpoint",
+                "phone_web":True,
+                "voice_ui":True,
+                "browser_speech_recognition":"client_detected",
+                "browser_speech_synthesis":"client_detected"
+            })
         if path == "/api/services":
             return self.send_json(200, {"ok":True,"services":SOL_SERVICES,"routing_rule":"Sol-owned service first; language model is a voice/generation layer, not the universal executor."})
         if path == "/api/task-receipts":
