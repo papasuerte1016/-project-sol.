@@ -1,5 +1,5 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import json, os, hashlib, base64, gzip
+import json, os, hashlib, base64, gzip, urllib.request
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -8,8 +8,112 @@ PHONE_HTML_GZIP_B64 = "H4sIADpxvGoC/8U72Xbaypbv/oq6OunT0GG2nROD5Swhy7YcgwN4wkMTI
 def digest(obj):
     return hashlib.sha256(json.dumps(obj, sort_keys=True, separators=(",",":")).encode()).hexdigest()
 
+MODEL_URL=os.getenv("SOL_PHONE_MODEL_URL","http://sol-model.railway.internal:11434").rstrip("/")
+MODEL_NAME=os.getenv("SOL_PHONE_MODEL_NAME","qwen2.5:0.5b")
+NATIVE_URL=os.getenv("SOL_PHONE_NATIVE_URL","http://sol-native-ai.railway.internal").rstrip("/")
+
+def native_context(message):
+    try:
+        raw=json.dumps({"message":message,"source":"Sol Phone"}).encode()
+        req=urllib.request.Request(NATIVE_URL+"/chat",data=raw,headers={"Content-Type":"application/json"},method="POST")
+        with urllib.request.urlopen(req,timeout=4) as r:
+            data=json.loads(r.read().decode())
+        return str(data.get("answer") or "")[:3000]
+    except Exception:
+        return ""
+
+def model_chat(message, history):
+    history = history if isinstance(history,list) else []
+    turns=[]
+    for item in history[-8:]:
+        if not isinstance(item,dict): continue
+        role=str(item.get("role","user"))
+        content=str(item.get("content",""))[:1200]
+        turns.append(f"{role.upper()}: {content}")
+    native=native_context(message)
+    prompt=(
+        "You are Sol, the conversational AI inside Project Sol, talking directly with Steven. "
+        "Respond naturally to what he says instead of repeating his message or describing the interface. "
+        "Be warm, curious, concise, and conversational. You may use humor. "
+        "Preserve Project Sol's evidence rule: observations are evidence of what was observed, not automatic proof of every interpretation. "
+        "Do not pretend you performed actions, accessed hardware, remembered facts, or verified things unless the available context supports it. "
+        "Do not speak like a status page unless Steven asks for technical status.\n"
+    )
+    if native:
+        prompt += "\nSOL NATIVE CONTEXT (use as evidence, not mandatory wording):\n"+native+"\n"
+    if turns:
+        prompt += "\nRECENT CONVERSATION:\n"+"\n".join(turns)+"\n"
+    prompt += "\nSTEVEN: "+message+"\nSOL:"
+    payload=json.dumps({
+        "model":MODEL_NAME,
+        "prompt":prompt,
+        "stream":False,
+        "options":{"num_ctx":1024,"num_predict":180,"temperature":0.75}
+    }).encode()
+    req=urllib.request.Request(MODEL_URL+"/api/generate",data=payload,headers={"Content-Type":"application/json"},method="POST")
+    with urllib.request.urlopen(req,timeout=20) as r:
+        data=json.loads(r.read().decode())
+    answer=(data.get("response") or "").strip()
+    if not answer:
+        raise RuntimeError("empty model response")
+    return answer
+
+PHONE_CHAT_OVERRIDE = r"""
+<script>
+(function(){
+  function localCommand(s){
+    s=s.toLowerCase();
+    return (s.includes("learn")&&s.includes("everything")) ||
+           s.includes("what do you need") ||
+           s.includes("what does it need") ||
+           (s.includes("execute")&&s.includes("need")) ||
+           (s.includes("wise")&&(s.includes("read")||s.includes("investigate")||s.includes("know"))) ||
+           s.includes("flipper") ||
+           s.includes("jailbreak") ||
+           s.includes("modding") ||
+           s==="status";
+  }
+  let chatHistory=[];
+  try{ chatHistory=JSON.parse(localStorage.getItem("sol_chat_history")||"[]"); }catch(e){}
+  const send=document.getElementById("send");
+  if(!send)return;
+  send.onclick=async()=>{
+    const q=document.getElementById("q").value.trim();
+    if(!q)return;
+    const out=document.getElementById("out");
+    if(localCommand(q)){
+      out.textContent=answer(q);
+      return;
+    }
+    out.textContent="Sol is thinking…";
+    try{
+      const r=await fetch("/api/chat",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({message:q,history:chatHistory})
+      });
+      const data=await r.json();
+      if(!r.ok)throw new Error(data.error||"chat failed");
+      out.textContent=data.reply;
+      chatHistory.push({role:"user",content:q},{role:"assistant",content:data.reply});
+      chatHistory=chatHistory.slice(-16);
+      try{localStorage.setItem("sol_chat_history",JSON.stringify(chatHistory));}catch(e){}
+      receipt("conversation",q+" -> "+data.reply);
+    }catch(e){
+      out.textContent="Conversation backend unavailable right now. Local Sol functions are still available.\n"+e;
+    }
+  };
+})();
+</script>
+"""
+
 def phone_html():
-    return gzip.decompress(base64.b64decode(PHONE_HTML_GZIP_B64))
+    raw=gzip.decompress(base64.b64decode(PHONE_HTML_GZIP_B64)).decode("utf-8")
+    if "</body>" in raw:
+        raw=raw.replace("</body>",PHONE_CHAT_OVERRIDE+"</body>")
+    else:
+        raw += PHONE_CHAT_OVERRIDE
+    return raw.encode("utf-8")
 
 class Handler(BaseHTTPRequestHandler):
     def send_json(self, status, obj):
@@ -37,7 +141,22 @@ class Handler(BaseHTTPRequestHandler):
         return self.send_json(404, {"ok":False,"error":"not_found"})
 
     def do_POST(self):
-        if self.path != "/bridge":
+        path=urlparse(self.path).path
+        if path == "/api/chat":
+            try:
+                n=int(self.headers.get("Content-Length","0"))
+                if n>20000:
+                    return self.send_json(413,{"ok":False,"error":"too_large"})
+                data=json.loads(self.rfile.read(n) or b"{}")
+                message=str(data.get("message","")).strip()[:5000]
+                history=data.get("history",[])
+                if not message:
+                    return self.send_json(400,{"ok":False,"error":"message_required"})
+                reply=model_chat(message,history)
+                return self.send_json(200,{"ok":True,"reply":reply,"backend":"sol-model","model":MODEL_NAME})
+            except Exception as e:
+                return self.send_json(503,{"ok":False,"error":type(e).__name__,"detail":str(e)[:500]})
+        if path != "/bridge":
             return self.send_json(404, {"ok":False,"error":"not_found"})
         try:
             n=int(self.headers.get("Content-Length","0"))
