@@ -14,10 +14,18 @@ NATIVE_URL=os.getenv("SOL_PHONE_NATIVE_URL","http://sol-native-ai.railway.intern
 MEDIA_URL=os.getenv("SOL_PHONE_MEDIA_URL","").rstrip("/")
 
 SOL_SERVICES={
-    "native_reasoning":{"url":NATIVE_URL,"kind":"sol_owned","role":"reasoning, receipts, retrieval"},
-    "language_model":{"url":MODEL_URL,"kind":"sol_owned","role":"language generation"},
-    "media":{"url":MEDIA_URL or None,"kind":"sol_owned","role":"image/video/media generation","status":"configured" if MEDIA_URL else "not_deployed_in_current_service_map"},
+    "native_reasoning":{"url":NATIVE_URL,"kind":"sol_owned","role":"reasoning, receipts, retrieval","available":True},
+    "language_model":{"url":MODEL_URL,"kind":"sol_owned","role":"language generation","available":True},
+    "media":{"url":MEDIA_URL or None,"kind":"sol_owned","role":"image/video/media generation","available":bool(MEDIA_URL)},
+    "task_planner":{"url":"local","kind":"sol_owned","role":"plan multi-step tasks and route capabilities","available":True},
+    "task_executor":{"url":"local","kind":"sol_owned","role":"execute connected capabilities, inspect results, preserve task receipt","available":True},
+    "web_search":{"url":None,"kind":"adapter","role":"fresh web search/browser research","available":False},
+    "file_tools":{"url":None,"kind":"adapter","role":"read/write user files and create artifacts","available":False},
+    "code_sandbox":{"url":None,"kind":"adapter","role":"run generated code safely","available":False},
+    "external_apps":{"url":None,"kind":"adapter","role":"GitHub/Railway/other authenticated app actions","available":False},
+    "scheduler":{"url":None,"kind":"adapter","role":"scheduled and ongoing task execution","available":False},
 }
+TASK_RECEIPTS=[]
 
 def native_context(message):
     try:
@@ -123,6 +131,97 @@ def classify_service(message):
         return "media"
     return "conversation"
 
+def task_like(message):
+    s=message.strip().lower()
+    starters=("research ","find ","look up ","search ","build ","create ","make ","edit ","change ","fix ","deploy ","run ","test ","check ","summarize ","analyze ","compare ","generate ","write ","download ","upload ","publish ","schedule ","monitor ")
+    return s.startswith(starters) or any(x in s for x in (" for me","do this","handle this","carry this out","take care of this"))
+
+def classify_task(message):
+    s=message.lower()
+    if any(x in s for x in ("generate an image","create an image","make an image","generate a video","create a video","make a video","animate","runway")):
+        return "media"
+    if any(x in s for x in ("research","search the web","look up","latest","find online","browse")):
+        return "web_search"
+    if any(x in s for x in ("file","pdf","docx","spreadsheet","excel","csv","document","presentation","pptx","edit this")):
+        return "file_tools"
+    if any(x in s for x in ("run code","execute code","python","compile","debug this code","test this code")):
+        return "code_sandbox"
+    if any(x in s for x in ("github","railway","deploy","repository","repo","commit","service")):
+        return "external_apps"
+    if any(x in s for x in ("schedule","remind","monitor","every day","every hour","later today","tomorrow")):
+        return "scheduler"
+    return "native_reasoning"
+
+def task_plan(message):
+    capability=classify_task(message)
+    return {
+        "goal":message,
+        "capability":capability,
+        "steps":[
+            "understand_goal",
+            "select_capability",
+            "execute_connected_adapter",
+            "inspect_result",
+            "preserve_receipt",
+            "continue_or_finish"
+        ],
+        "adapter_available":bool(SOL_SERVICES.get(capability,{}).get("available")),
+        "rule":"Do not claim completion unless execution evidence exists."
+    }
+
+def task_receipt(task_id,plan,status,result=None,error=None):
+    rec={
+        "task_id":task_id,
+        "time":datetime.now(timezone.utc).isoformat(),
+        "plan":plan,
+        "status":status,
+        "result":result,
+        "error":error,
+    }
+    rec["sha256"]=digest(rec)
+    TASK_RECEIPTS.append(rec)
+    if len(TASK_RECEIPTS)>200:
+        del TASK_RECEIPTS[:-200]
+    return rec
+
+def execute_task(message,history=None):
+    plan=task_plan(message)
+    task_id="task-"+hashlib.sha256((message+datetime.now(timezone.utc).isoformat()).encode()).hexdigest()[:12]
+    cap=plan["capability"]
+
+    if cap=="media":
+        result=media_request(message)
+        status="completed" if result.get("ok") else "waiting_for_adapter"
+        rec=task_receipt(task_id,plan,status,result=result)
+        return {"ok":True,"task":True,"task_id":task_id,"status":status,"plan":plan,"result":result,"receipt":rec,
+                "reply":result.get("reply","")}
+
+    if cap=="native_reasoning":
+        native=native_context("TASK REQUEST: "+message)
+        if native:
+            result={"service":"native_reasoning","output":native}
+            rec=task_receipt(task_id,plan,"completed",result=result)
+            return {"ok":True,"task":True,"task_id":task_id,"status":"completed","plan":plan,"result":result,"receipt":rec,"reply":native}
+        rec=task_receipt(task_id,plan,"failed",error="native_reasoning_unavailable")
+        return {"ok":True,"task":True,"task_id":task_id,"status":"failed","plan":plan,"receipt":rec,
+                "reply":"I received the task, but my native reasoning service did not return execution evidence."}
+
+    missing=SOL_SERVICES.get(cap,{})
+    result={
+        "capability":cap,
+        "adapter_available":False,
+        "status":"waiting_for_adapter",
+        "what_is_missing":missing.get("role","unknown capability"),
+        "execution_performed":False
+    }
+    rec=task_receipt(task_id,plan,"waiting_for_adapter",result=result)
+    return {
+        "ok":True,"task":True,"task_id":task_id,"status":"waiting_for_adapter",
+        "plan":plan,"result":result,"receipt":rec,
+        "reply":("I planned this as a "+cap+" task. The task loop is working, but that adapter is not attached to this deployed Sol yet, "
+                 "so I did not pretend the action ran. The receipt records the missing capability.")
+    }
+
 def service_chat(message,history):
     route=classify_service(message)
     if route=="media":
@@ -195,9 +294,10 @@ PHONE_CHAT_OVERRIDE = r"""
       out.textContent=answer(q);
       return;
     }
-    out.textContent="Sol is thinking…";
+    const isTask=/^(research|find|look up|search|build|create|make|edit|change|fix|deploy|run|test|check|summarize|analyze|compare|generate|write|download|upload|publish|schedule|monitor)\b/i.test(q) || /\b(for me|do this|handle this|carry this out|take care of this)\b/i.test(q);
+    out.textContent=isTask?"Sol is working on the task…":"Sol is thinking…";
     try{
-      const r=await fetch("/api/chat",{
+      const r=await fetch(isTask?"/api/task":"/api/chat",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({message:q,history:chatHistory})
@@ -250,10 +350,25 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, {"ok":True,"service":"sol-external-bridge-endpoint","phone_web":True})
         if path == "/api/services":
             return self.send_json(200, {"ok":True,"services":SOL_SERVICES,"routing_rule":"Sol-owned service first; language model is a voice/generation layer, not the universal executor."})
+        if path == "/api/task-receipts":
+            return self.send_json(200, {"ok":True,"receipts":TASK_RECEIPTS[-50:]})
         return self.send_json(404, {"ok":False,"error":"not_found"})
 
     def do_POST(self):
         path=urlparse(self.path).path
+        if path == "/api/task":
+            try:
+                n=int(self.headers.get("Content-Length","0"))
+                if n>20000:
+                    return self.send_json(413,{"ok":False,"error":"too_large"})
+                data=json.loads(self.rfile.read(n) or b"{}")
+                message=str(data.get("message","")).strip()[:5000]
+                history=data.get("history",[])
+                if not message:
+                    return self.send_json(400,{"ok":False,"error":"message_required"})
+                return self.send_json(200,execute_task(message,history))
+            except Exception as e:
+                return self.send_json(503,{"ok":False,"error":type(e).__name__,"detail":str(e)[:500]})
         if path == "/api/chat":
             try:
                 n=int(self.headers.get("Content-Length","0"))
