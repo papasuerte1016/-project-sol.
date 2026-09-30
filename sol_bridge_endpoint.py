@@ -581,6 +581,10 @@ class Handler(BaseHTTPRequestHandler):
             })
         if path == "/api/services":
             return self.send_json(200, {"ok":True,"services":SOL_SERVICES,"routing_rule":"Sol-owned service first; language model is a voice/generation layer, not the universal executor."})
+        if path == "/api/self-diagnose":
+            prompt=("Why aren't you running properly on the phone right now? Diagnose yourself from your current connected services, task executors, "
+                    "model state, and interface. Separate what is actually working, what is not working, and the main causes. Do not invent capabilities.")
+            return self.send_json(200, dispatch_message(prompt, []))
         if path == "/api/task-receipts":
             return self.send_json(200, {"ok":True,"receipts":TASK_RECEIPTS[-50:]})
         return self.send_json(404, {"ok":False,"error":"not_found"})
