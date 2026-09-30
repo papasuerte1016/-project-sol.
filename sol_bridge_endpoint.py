@@ -26,6 +26,7 @@ SOL_SERVICES={
     "scheduler":{"url":None,"kind":"adapter","role":"scheduled and ongoing task execution","available":False},
 }
 TASK_RECEIPTS=[]
+MODEL_WARMING=False
 
 
 def _probe_json(url,timeout=3):
@@ -93,29 +94,30 @@ def warm_model():
     try:
         payload=json.dumps({
             "model":MODEL_NAME,
-            "prompt":"Reply with one word: ready",
+            "prompt":"",
             "stream":False,
-            "keep_alive":"30m",
-            "options":{"num_ctx":256,"num_predict":4}
+            "keep_alive":"-1",
+            "options":{"num_ctx":256,"num_predict":0}
         }).encode()
         req=urllib.request.Request(MODEL_URL+"/api/generate",data=payload,headers={"Content-Type":"application/json"},method="POST")
-        with urllib.request.urlopen(req,timeout=90) as r:
+        with urllib.request.urlopen(req,timeout=120) as r:
             r.read()
     except Exception:
         pass
 
 def conversational_native_fallback(message,native):
     m=message.strip().lower()
-    if m in ("hello","hi","hey","yo"):
-        return "Hey Steven 😂 I’m here. My native Sol services are active; my language-model voice is warming up in the background."
-    if "how are you" in m:
-        return "I’m running and paying attention 😂 My native reasoning is available right now, and the language-model voice is warming in the background."
-    if "what can you do" in m or "what do you do" in m:
-        return ("I can reason over Sol’s preserved knowledge, receipts, questions, and relationships; run the phone-side learning experiments; "
-                "track needs; investigate subjects; and route tasks to Sol-owned capabilities. My language-model voice is optional and warms separately.")
     if native:
+        # Native Sol already reasoned over the message; surface that instead of a canned capability paragraph.
         return native
-    return "I’m here. My native Sol reasoning is available even while the language-model voice is warming up."
+    if m in ("hello","hi","hey","yo"):
+        return "Hey Steven 😂 I’m here."
+    if "how are you" in m:
+        return "I’m here and running 😂 I’m still connecting some of my deeper services, but I can talk with you normally."
+    if "what can you do" in m or "what do you do" in m:
+        return ("Right now I can talk with you, use my native Sol reasoning, inspect my own state, and perform live web research. "
+                "Some other task tools are still being connected, so I won’t pretend I used one when I didn’t.")
+    return "I’m here with you. I understood the message, but my language model did not return a response yet."
 
 def model_chat(message, history, native=""):
     history = history if isinstance(history,list) else []
@@ -146,7 +148,7 @@ def model_chat(message, history, native=""):
         "options":{"num_ctx":512,"num_predict":96,"temperature":0.75}
     }).encode()
     req=urllib.request.Request(MODEL_URL+"/api/generate",data=payload,headers={"Content-Type":"application/json"},method="POST")
-    with urllib.request.urlopen(req,timeout=12) as r:
+    with urllib.request.urlopen(req,timeout=45) as r:
         data=json.loads(r.read().decode())
     answer=(data.get("response") or "").strip()
     if not answer:
@@ -389,6 +391,19 @@ def dispatch_message(message,history):
     result["mode"]="conversation"
     return result
 
+def ensure_model_warming():
+    global MODEL_WARMING
+    if MODEL_WARMING:
+        return
+    MODEL_WARMING=True
+    def _run():
+        global MODEL_WARMING
+        try:
+            warm_model()
+        finally:
+            MODEL_WARMING=False
+    threading.Thread(target=_run,daemon=True).start()
+
 def service_chat(message,history):
     route=classify_service(message)
     if route=="media":
@@ -400,7 +415,7 @@ def service_chat(message,history):
     # If the language model is cold, do NOT block the entire phone conversation.
     # Answer immediately from Sol's native service and warm the optional voice layer in background.
     if not model_is_warm():
-        threading.Thread(target=warm_model,daemon=True).start()
+        ensure_model_warming()
         return {
             "ok":True,
             "handled":True,
@@ -423,7 +438,7 @@ def service_chat(message,history):
             "model_state":"warm"
         }
     except Exception as e:
-        threading.Thread(target=warm_model,daemon=True).start()
+        ensure_model_warming()
         return {
             "ok":True,
             "handled":True,
@@ -538,7 +553,7 @@ body main{max-width:760px}
       out.textContent="Speech recognition is not exposed by this browser. Text input still works, and spoken replies can still work if speech synthesis is available.";
     };
   }
-  out.textContent="Ready.";
+  out.textContent="Ready. Talk to me normally or give me a task.";
   try{
     document.querySelectorAll(".badge").forEach(el=>{
       if(el.textContent.trim()==="No server required") el.textContent="Sol services connected";
@@ -703,6 +718,6 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__=="__main__":
     SOL_BOOT_WARM_STARTED=True
-    threading.Thread(target=warm_model,daemon=True).start()
+    ensure_model_warming()
     port=int(os.environ.get("PORT","8080"))
     HTTPServer(("0.0.0.0",port),Handler).serve_forever()
