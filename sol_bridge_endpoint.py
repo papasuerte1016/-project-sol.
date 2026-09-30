@@ -1,5 +1,5 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import json, os, hashlib, base64, gzip, urllib.request
+import json, os, hashlib, base64, gzip, urllib.request, threading
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -29,6 +29,42 @@ def native_context(message):
     except Exception:
         return ""
 
+def model_is_warm():
+    try:
+        with urllib.request.urlopen(MODEL_URL+"/api/ps",timeout=1.5) as r:
+            data=json.loads(r.read().decode())
+        return any((m.get("name") or "").startswith(MODEL_NAME.split(":")[0]) for m in data.get("models",[]))
+    except Exception:
+        return False
+
+def warm_model():
+    try:
+        payload=json.dumps({
+            "model":MODEL_NAME,
+            "prompt":"Reply with one word: ready",
+            "stream":False,
+            "keep_alive":"30m",
+            "options":{"num_ctx":256,"num_predict":4}
+        }).encode()
+        req=urllib.request.Request(MODEL_URL+"/api/generate",data=payload,headers={"Content-Type":"application/json"},method="POST")
+        with urllib.request.urlopen(req,timeout=90) as r:
+            r.read()
+    except Exception:
+        pass
+
+def conversational_native_fallback(message,native):
+    m=message.strip().lower()
+    if m in ("hello","hi","hey","yo"):
+        return "Hey Steven 😂 I’m here. My native Sol services are active; my language-model voice is warming up in the background."
+    if "how are you" in m:
+        return "I’m running and paying attention 😂 My native reasoning is available right now, and the language-model voice is warming in the background."
+    if "what can you do" in m or "what do you do" in m:
+        return ("I can reason over Sol’s preserved knowledge, receipts, questions, and relationships; run the phone-side learning experiments; "
+                "track needs; investigate subjects; and route tasks to Sol-owned capabilities. My language-model voice is optional and warms separately.")
+    if native:
+        return native
+    return "I’m here. My native Sol reasoning is available even while the language-model voice is warming up."
+
 def model_chat(message, history, native=""):
     history = history if isinstance(history,list) else []
     turns=[]
@@ -54,10 +90,11 @@ def model_chat(message, history, native=""):
         "model":MODEL_NAME,
         "prompt":prompt,
         "stream":False,
-        "options":{"num_ctx":1536,"num_predict":220,"temperature":0.75}
+        "keep_alive":"30m",
+        "options":{"num_ctx":512,"num_predict":96,"temperature":0.75}
     }).encode()
     req=urllib.request.Request(MODEL_URL+"/api/generate",data=payload,headers={"Content-Type":"application/json"},method="POST")
-    with urllib.request.urlopen(req,timeout=20) as r:
+    with urllib.request.urlopen(req,timeout=12) as r:
         data=json.loads(r.read().decode())
     answer=(data.get("response") or "").strip()
     if not answer:
@@ -91,19 +128,45 @@ def service_chat(message,history):
     if route=="media":
         return media_request(message)
 
-    # Sol-owned native reasoning/retrieval runs first.
+    # Sol-owned native reasoning/retrieval always runs first.
     native=native_context(message)
 
-    # The model is then used as Sol's language surface, with native output supplied as context.
-    reply=model_chat(message,history,native)
-    return {
-        "ok":True,
-        "handled":True,
-        "service":"native_reasoning+language_model",
-        "service_order":["native_reasoning","language_model"],
-        "reply":reply,
-        "native_context_used":bool(native)
-    }
+    # If the language model is cold, do NOT block the entire phone conversation.
+    # Answer immediately from Sol's native service and warm the optional voice layer in background.
+    if not model_is_warm():
+        threading.Thread(target=warm_model,daemon=True).start()
+        return {
+            "ok":True,
+            "handled":True,
+            "service":"native_reasoning",
+            "service_order":["native_reasoning","language_model_warming_background"],
+            "reply":conversational_native_fallback(message,native),
+            "native_context_used":bool(native),
+            "model_state":"warming"
+        }
+
+    try:
+        reply=model_chat(message,history,native)
+        return {
+            "ok":True,
+            "handled":True,
+            "service":"native_reasoning+language_model",
+            "service_order":["native_reasoning","language_model"],
+            "reply":reply,
+            "native_context_used":bool(native),
+            "model_state":"warm"
+        }
+    except Exception as e:
+        threading.Thread(target=warm_model,daemon=True).start()
+        return {
+            "ok":True,
+            "handled":True,
+            "service":"native_reasoning",
+            "service_order":["native_reasoning","language_model_retry_background"],
+            "reply":conversational_native_fallback(message,native),
+            "native_context_used":bool(native),
+            "model_state":"fallback_after_"+type(e).__name__
+        }
 
 PHONE_CHAT_OVERRIDE = r"""
 <script>
