@@ -10,7 +10,7 @@ def digest(obj):
 
 MODEL_URL=os.getenv("SOL_PHONE_MODEL_URL","http://sol-model.railway.internal:11434").rstrip("/")
 MODEL_NAME=os.getenv("SOL_PHONE_MODEL_NAME","qwen2.5:0.5b")
-NATIVE_URL=os.getenv("SOL_PHONE_NATIVE_URL","http://sol-native-ai.railway.internal").rstrip("/")
+NATIVE_URL=os.getenv("SOL_PHONE_NATIVE_URL","http://sol-native-ai.railway.internal:8080").rstrip("/")
 MEDIA_URL=os.getenv("SOL_PHONE_MEDIA_URL","").rstrip("/")
 
 SOL_SERVICES={
@@ -26,6 +26,50 @@ SOL_SERVICES={
     "scheduler":{"url":None,"kind":"adapter","role":"scheduled and ongoing task execution","available":False},
 }
 TASK_RECEIPTS=[]
+
+
+def _probe_json(url,timeout=3):
+    try:
+        with urllib.request.urlopen(url,timeout=timeout) as r:
+            return {"ok":True,"status":r.status,"data":json.loads(r.read().decode())}
+    except Exception as e:
+        return {"ok":False,"error":type(e).__name__,"detail":str(e)[:300]}
+
+def direct_self_diagnosis():
+    native=_probe_json(NATIVE_URL+"/health",3)
+    model=_probe_json(MODEL_URL+"/api/ps",3)
+    loaded=[]
+    if model.get("ok"):
+        loaded=[x.get("name") for x in model.get("data",{}).get("models",[])]
+
+    missing=[name for name,meta in SOL_SERVICES.items() if not meta.get("available")]
+    working=[name for name,meta in SOL_SERVICES.items() if meta.get("available")]
+
+    causes=[]
+    if not native.get("ok"):
+        causes.append("native_reasoning_unreachable")
+    if not model.get("ok"):
+        causes.append("language_model_service_unreachable")
+    elif not loaded:
+        causes.append("language_model_not_resident")
+    if missing:
+        causes.append("some_task_adapters_not_connected")
+
+    return {
+        "ok":True,
+        "diagnosis":True,
+        "native_service":native,
+        "model_service":model,
+        "model_loaded":loaded,
+        "connected_capabilities":working,
+        "missing_capabilities":missing,
+        "main_causes":causes,
+        "summary":(
+            "Sol is only fully operational when its native reasoning service is reachable, "
+            "its language model is available when conversational generation is needed, "
+            "and the requested task has a connected executor. This report is based on direct service probes."
+        )
+    }
 
 def native_context(message):
     try:
@@ -582,9 +626,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/services":
             return self.send_json(200, {"ok":True,"services":SOL_SERVICES,"routing_rule":"Sol-owned service first; language model is a voice/generation layer, not the universal executor."})
         if path == "/api/self-diagnose":
-            prompt=("Why aren't you running properly on the phone right now? Diagnose yourself from your current connected services, task executors, "
-                    "model state, and interface. Separate what is actually working, what is not working, and the main causes. Do not invent capabilities.")
-            return self.send_json(200, dispatch_message(prompt, []))
+            return self.send_json(200, direct_self_diagnosis())
         if path == "/api/task-receipts":
             return self.send_json(200, {"ok":True,"receipts":TASK_RECEIPTS[-50:]})
         return self.send_json(404, {"ok":False,"error":"not_found"})
@@ -660,5 +702,7 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 if __name__=="__main__":
+    SOL_BOOT_WARM_STARTED=True
+    threading.Thread(target=warm_model,daemon=True).start()
     port=int(os.environ.get("PORT","8080"))
     HTTPServer(("0.0.0.0",port),Handler).serve_forever()
