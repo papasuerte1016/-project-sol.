@@ -1,0 +1,40 @@
+{
+  "probe": "Sol host capability verification",
+  "observed_at": "2026-09-30",
+  "observations": {
+    "github": {
+      "available": true,
+      "evidence": [
+        "authenticated GitHub connector read succeeded",
+        "Sol capability module fetched",
+        "Sol adapter module fetched",
+        "Sol adapter test fetched"
+      ],
+      "strength": "live read probe"
+    },
+    "codemagic": {
+      "available": false,
+      "state": "not exposed to this runtime",
+      "evidence": [
+        "no Codemagic connector available in current host toolset"
+      ],
+      "strength": "host exposure check"
+    },
+    "grok": {
+      "available": false,
+      "state": "no live transport exposed in current runtime",
+      "strength": "host exposure check"
+    },
+    "gemini": {
+      "available": false,
+      "state": "no live transport exposed in current runtime",
+      "strength": "host exposure check"
+    },
+    "iphone_native_runtime": {
+      "available": false,
+      "state": "artifact existence is not a live native runtime connection",
+      "strength": "boundary check"
+    }
+  },
+  "rule": "false means unavailable under these observed conditions, not universally impossible"
+}
